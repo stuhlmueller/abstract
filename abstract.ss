@@ -1,7 +1,6 @@
 #!r6rs
 
 ;; TODO:
-;; - get back variable names instead of *, build lambda
 ;; - for self-matches, don't both compare subtree A to B and B to A, only one direction
 ;; - compress original expr using abstraction
 ;;   (in all places, not only the two that were used to find the abstraction)
@@ -12,8 +11,16 @@
         (_srfi :69)
         (church readable-scheme))
 
+(define (all lst)
+  (if (null? lst)
+      #t
+      (and (first lst)
+           (all (rest lst)))))
+
+
 ;; look up value for key in alist; if not found,
 ;; set (default-thunk) as value and return it
+
 (define (get/make-alist-entry alist alist-set! key default-thunk)
   (let ([binding (assq key alist)])
     (if binding
@@ -25,6 +32,7 @@
 
 ;; unique readable symbols. this is used to enumerate lists and to
 ;; generate readable variable names.
+
 (define symbol-indizes '())
 
 (define (get-symbol-index-container tag)
@@ -47,6 +55,7 @@
 
 
 ;; memoization
+
 (define memtables '())
 
 (define (get/make-memtable f)
@@ -65,10 +74,18 @@
                               val))))))
 
 
-;; helper functions for accessing enumerated tree
+;; data structures
+
 (define etree->id first)
 (define etree->tree cdr) ;; non-recursive
 (define etree->children cddr)
+
+(define (make-abstraction pattern variables)
+  (list 'abstraction (sym 'F) variables pattern))
+(define abstraction->name second)
+(define abstraction->vars third)
+(define abstraction->pattern fourth)
+
 
 ;; transforms a tree like
 ;; (a (b) (c (d)) (e (f)))
@@ -78,6 +95,11 @@
   (if (symbol? t)
       t
       (pair (sym '$) (map enumerate-tree t))))
+
+(define (unenumerate-tree t)
+  (if (symbol? t)
+      t
+      (map unenumerate-tree (rest t))))
 
 ;; list all (enumerated) subtrees
 (define (all-subtrees t)
@@ -93,15 +115,6 @@
        (symbol? (first obj))
        (null? (rest obj))))
 
-;; recursively tests whether all values in a list are
-;; equal to a given value
-(define (all-val? lst val)
-  (if (null? lst)
-      #t
-      (and (if (list? (first lst))
-               (all-val? (first lst) val)
-               (eq? (first lst) val))
-           (all-val? (rest lst) val))))
 
 ;; returns #f if trees cannot be unified,
 ;; otherwise tree with * in places where they differ
@@ -115,9 +128,8 @@
          (begin 
            (define variables '())
            (define (add-variable!)
-             (begin 
-               (set! variables (pair (sym 'x) variables))
-               (first variables)))
+             (set! variables (pair (sym 'v) variables))
+             (first variables))
            (define (build-pattern et1 et2 ignore-id-matches)
              (cond [(and (symbol? et1) (symbol? et2)) (if (eq? et1 et2) et1 (add-variable!))]
                    [(or (symbol? et1) (symbol? et2)) (add-variable!)]
@@ -125,25 +137,30 @@
                    [(not (eqv? (length et1) (length et2))) (add-variable!)]
                    [else
                     (let ([unified-tree (map (lambda (t1 t2) (build-pattern t1 t2 ignore-id-matches))
-                                             (etree->tree et1) (etree->tree et2))])
-                      (if (any (lambda (st) (eq? st #f)) unified-tree)
+                                             (etree->tree et1)
+                                             (etree->tree et2))])
+                      (if (any false? unified-tree)
                           #f
                           unified-tree))]))
-           (let ((pattern (build-pattern et1 et2 ignore-id-matches)))
+           (let ([pattern (build-pattern et1 et2 ignore-id-matches)])
              (list variables pattern))))))
 
-
-;; filters out a few uninteresting results (singleton, *, and tree of
-;; only *s)
+;; filter out a few uninteresting abstractions
+;; (single variable or singleton list)
 (define (filtered-anti-unify et1 et2 ignore-id-matches)
   (let* ([variables-pattern (anti-unify et1 et2 ignore-id-matches)]
-        [variables (first variables-pattern)]
-        [pattern (second variables-pattern)])
+         [variables (first variables-pattern)]
+         [pattern (second variables-pattern)])
     (begin
+      (define (plain-var-list? pattern)
+        (all (map (lambda (i) (member i variables)) pattern)))
       (if (or (member pattern variables)
-              (singleton? pattern))
+              (singleton? pattern)
+              (and (list? pattern) (plain-var-list? pattern)))
           #f
-          variables-pattern))))
+          (if (false? pattern)
+              #f
+              (make-abstraction pattern variables))))))
 
 ;; anti-unify all combinations of subtrees
 (define (common-subtrees et1 et2 ignore-id-matches)
@@ -161,13 +178,47 @@
 (define (self-matches et)
   (common-subtrees et et #t))
 
+;; takes a sexpr (s), a sexpr with variables (sv) and a proc name, e.g.
+;; s = (foo (foo a b c) b c)
+;; sv = (foo V b c)
+;; name = P
+;; first pass: (P (foo a b c))
+;; second (operand) pass: (P (P a))
+;; returns #f if abstraction cannot be applied, otherwise variable assignments
+;; ! assumes that each variable occurs only once in sv
+(define (unify s sv vars)
+  (define (variable? obj)
+    (member obj vars))
+  (cond [(variable? sv) (list (pair sv s))]
+        [(and (symbol? s) (symbol? sv)) (if (eq? s sv) '() #f)]
+        [(or (symbol? s) (symbol? sv)) #f]
+        [(not (eqv? (length s) (length sv))) #f]
+        [else
+         (let ([assignments (map (lambda (si sj) (unify si sj vars)) s sv)])
+           (if (any false? assignments)
+               #f
+               (apply append assignments)))]))
+
+;; doesn't deal with partial matches, could use more error checking
+(define (replace-matches s abstraction)
+  (let ([unified-vars (unify s
+                             (abstraction->pattern abstraction)
+                             (abstraction->vars abstraction))])
+    (if (false? unified-vars)
+        (if (list? s)
+            (map (lambda (si) (replace-matches si abstraction)) s)
+            s)
+        (pair (abstraction->name abstraction)
+              (map (lambda (var) (replace-matches (rest (assq var unified-vars)) abstraction))
+                   (abstraction->vars abstraction))))))
+
 (define (pretty-print-match m)
   (for-each display
-            (list "t1: " (first m) "\n"
-                  "t2: " (second m) "\n"
-                  "m: " (third m) "\n\n")))
+            (list "t1: " (unenumerate-tree (first m)) "\n"
+                  "t2: " (unenumerate-tree (second m)) "\n"
+                  "m: " (abstraction->pattern (third m)) "\n\n")))
 
-(define (test)
+(define (test-self-matching)
   (let* ([test-tree '(((u) b y (a (b (c d e)) f g) x (a c))
                       ((i) b z (a (b (c d e)) f g) x (a d)) f)]
          [enum-test-tree (enumerate-tree test-tree)])
@@ -178,5 +229,10 @@
          (filter (lambda (m) (third m))
                  (self-matches enum-test-tree)))))
 
-(test)
+(define (test-match-replacement)
+  (let* ([test-tree '(e f ((d (a b c)) b c) g h)]
+         [abstraction (make-abstraction '(X b c) '(X))])
+    (pretty-print (replace-matches test-tree abstraction))))
+
+(test-self-matching)
 
