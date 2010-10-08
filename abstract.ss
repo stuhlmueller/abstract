@@ -186,18 +186,20 @@
 ;; second (operand) pass: (P (P a))
 ;; returns #f if abstraction cannot be applied, otherwise variable assignments
 ;; ! assumes that each variable occurs only once in sv
-(define (unify s sv vars)
-  (define (variable? obj)
-    (member obj vars))
-  (cond [(variable? sv) (list (pair sv s))]
-        [(and (symbol? s) (symbol? sv)) (if (eq? s sv) '() #f)]
-        [(or (symbol? s) (symbol? sv)) #f]
-        [(not (eqv? (length s) (length sv))) #f]
-        [else
-         (let ([assignments (map (lambda (si sj) (unify si sj vars)) s sv)])
-           (if (any false? assignments)
-               #f
-               (apply append assignments)))]))
+(define unify
+  (mem (lambda (s sv vars)
+         (begin
+           (define (variable? obj)
+             (member obj vars))
+           (cond [(variable? sv) (list (pair sv s))]
+                 [(and (symbol? s) (symbol? sv)) (if (eq? s sv) '() #f)]
+                 [(or (symbol? s) (symbol? sv)) #f]
+                 [(not (eqv? (length s) (length sv))) #f]
+                 [else
+                  (let ([assignments (map (lambda (si sj) (unify si sj vars)) s sv)])
+                    (if (any false? assignments)
+                        #f
+                        (apply append assignments)))])))))
 
 ;; doesn't deal with partial matches, could use more error checking
 (define (replace-matches s abstraction)
@@ -234,5 +236,5 @@
          [abstraction (make-abstraction '(X b c) '(X))])
     (pretty-print (replace-matches test-tree abstraction))))
 
-(test-self-matching)
+(test-match-replacement)
 
