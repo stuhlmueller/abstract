@@ -1,16 +1,35 @@
 #!r6rs
 
+;; TODO:
+;; - get back variable names instead of *, build lambda
+;; - for self-matches, don't both compare subtree A to B and B to A, only one direction
+;; - compress original expr using abstraction
+;;   (in all places, not only the two that were used to find the abstraction)
+;; - enumerate should generate unique ids, not numbers
+
 (import (except (rnrs) string-hash string-ci-hash)
         (_srfi :1)
         (_srfi :69)
         (church readable-scheme))
 
-;; (make-hash-table equal?)
-;; (hash-table-ref ht key (lambda () default))
-;; (hash-table-set! ht key val)
+(define memtables '())
 
-;; (list (func ht) ...)
-;; memq
+(define (get/make-memtable f)
+  (let ([binding (assq f memtables)])
+    (if binding
+        (rest binding)
+        (let ([mt (make-hash-table equal?)])
+          (set! memtables (pair (pair f mt) memtables))
+          mt))))
+
+(define (mem f)
+  (lambda args
+    (let ([mt (get/make-memtable f)])
+      (hash-table-ref mt
+                      args
+                      (lambda () (let ([val (apply f args)])
+                              (hash-table-set! mt args val)
+                              val))))))
 
 ;; helper functions for accessing enumerated tree
 (define etree->id first)
@@ -63,25 +82,26 @@
 ;; (z (a (x (k (l)) (h (m)))) (c) (d (h (f)) (i)))
 ;; this:
 ;; (z (a (x (* (*)) (h (m)))) (c) (d * (i)))
+(define anti-unify
+  (mem (lambda (et1 et2 ignore-id-matches)
+         (cond [(and (symbol? et1) (symbol? et2)) (if (eq? et1 et2) et1 '*)]
+               [(or (symbol? et1) (symbol? et2)) '*]
+               [(and ignore-id-matches (eqv? (etree->id et1) (etree->id et2))) #f]
+               [(not (eqv? (length et1) (length et2))) '*]
+               [else
+                (let ([unified-tree (map (lambda (t1 t2) (anti-unify t1 t2 ignore-id-matches))
+                                         (etree->tree et1) (etree->tree et2))])
+                  (if (any (lambda (st) (eq? st #f)) unified-tree)
+                      #f
+                      unified-tree))]))))
+
 ;; filters out a few uninteresting results (singleton, *, and tree of
 ;; only *s)
-(define (anti-unify et1 et2 ignore-id-matches)
-  (define (%anti-unify et1 et2)
-    (cond [(and (symbol? et1) (symbol? et2)) (if (eq? et1 et2) et1 '*)]
-          [(or (symbol? et1) (symbol? et2)) '*]
-          [(and ignore-id-matches (eqv? (etree->id et1) (etree->id et2))) #f]
-          [(not (eqv? (length et1) (length et2))) '*]
-          [else
-           (let ([unified-tree (map (lambda (t1 t2) (%anti-unify t1 t2))
-                                    (etree->tree et1) (etree->tree et2))])
-             (if (any (lambda (st) (eq? st #f)) unified-tree)
-                 #f
-                 unified-tree))]))
-  (let ([result (%anti-unify et1 et2)])
+(define (filtered-anti-unify et1 et2 ignore-id-matches)
+  (let ([result (anti-unify et1 et2 ignore-id-matches)])
     (if (or (eq? result '*)
             (singleton? result)
-            ;; (and (list? result) (all-val? result '*))
-            )
+            (and (list? result) (all-val? result '*)))
         #f
         result)))
 
@@ -92,7 +112,7 @@
     (apply append
            (map (lambda (st1)
                   (map (lambda (st2)
-                         (list st1 st2 (anti-unify st1 st2 ignore-id-matches)))
+                         (list st1 st2 (filtered-anti-unify st1 st2 ignore-id-matches)))
                          sts2))
                        sts1))))
 
@@ -108,7 +128,8 @@
                   "m: " (third m) "\n\n")))
 
 (define (test)
-  (let* ([test-tree '((a) (a))]
+  (let* ([test-tree '(((u) b y (a (b (c d e)) f g) x (a c))
+                      ((i) b z (a (b (c d e)) f g) x (a d)) f)]
          [enum-test-tree (enumerate-tree test-tree)])
     (for-each display
               (list "test-tree: " test-tree "\n"
@@ -117,14 +138,9 @@
          (filter (lambda (m) (third m))
                  (self-matches enum-test-tree)))))
 
-;; - get back variable names instead of *, build lambda
-;; - mem for anti-unify
-;; - for self-matches, don't both compare subtree A to B and B to A, only one direction
-;; - compress original expr using abstraction
-;;   (in all places, not only the two that were used to find the abstraction)
 (test)
 
 (define bad '((a) (a)))
 (enumerate-tree bad)
 (all-enum-subtrees bad)
-(anti-unify '((a b)) '((a b)) #t)
+(anti-unify '(a b) '(a b) #t)
