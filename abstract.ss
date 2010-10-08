@@ -108,8 +108,7 @@
                   "m: " (third m) "\n\n")))
 
 (define (test)
-  (let* ([test-tree '(((u) b y x (a c))
-                      ((i) b z x (a d)) f)]
+  (let* ([test-tree '((a) (a))]
          [enum-test-tree (enumerate-tree test-tree)])
     (for-each display
               (list "test-tree: " test-tree "\n"
@@ -125,3 +124,7 @@
 ;;   (in all places, not only the two that were used to find the abstraction)
 (test)
 
+(define bad '((a) (a)))
+(enumerate-tree bad)
+(all-enum-subtrees bad)
+(anti-unify '((a b)) '((a b)) #t)
