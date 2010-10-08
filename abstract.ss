@@ -5,22 +5,55 @@
 ;; - for self-matches, don't both compare subtree A to B and B to A, only one direction
 ;; - compress original expr using abstraction
 ;;   (in all places, not only the two that were used to find the abstraction)
-;; - enumerate should generate unique ids, not numbers
 
 (import (except (rnrs) string-hash string-ci-hash)
+        (only (ikarus) set-car! set-cdr!)
         (_srfi :1)
         (_srfi :69)
         (church readable-scheme))
 
+;; look up value for key in alist; if not found,
+;; set (default-thunk) as value and return it
+(define (get/make-alist-entry alist alist-set! key default-thunk)
+  (let ([binding (assq key alist)])
+    (if binding
+        (rest binding)
+        (let* ([default-val (default-thunk)])
+          (alist-set! key default-val)
+          default-val))))
+
+
+;; unique readable symbols. this is used to enumerate lists and to
+;; generate readable variable names.
+(define symbol-indizes '())
+
+(define (get-symbol-index-container tag)
+  (get/make-alist-entry symbol-indizes
+                        (lambda (k v) (set! symbol-indizes (pair (pair k v) symbol-indizes)))
+                        tag
+                        (lambda () (list 0))))
+
+(define (get-symbol-index tag)
+  (first (get-symbol-index-container tag)))
+
+(define (inc-symbol-index! tag)
+  (let ([tag-index-container (get-symbol-index-container tag)])
+    (set-car! tag-index-container (+ (first tag-index-container) 1))))
+
+(define (sym tag)
+  (inc-symbol-index! tag)
+  (string->symbol (string-append (symbol->string tag)
+                                 (number->string (get-symbol-index tag)))))
+
+
+;; memoization
 (define memtables '())
 
 (define (get/make-memtable f)
-  (let ([binding (assq f memtables)])
-    (if binding
-        (rest binding)
-        (let ([mt (make-hash-table equal?)])
-          (set! memtables (pair (pair f mt) memtables))
-          mt))))
+  (get/make-alist-entry memtables
+                        (lambda (k v) (set! memtables (pair (pair k v) memtables)))
+                        f
+                        (lambda () (make-hash-table equal?))))
 
 (define (mem f)
   (lambda args
@@ -31,6 +64,7 @@
                               (hash-table-set! mt args val)
                               val))))))
 
+
 ;; helper functions for accessing enumerated tree
 (define etree->id first)
 (define etree->tree cdr) ;; non-recursive
@@ -39,20 +73,14 @@
 ;; transforms a tree like
 ;; (a (b) (c (d)) (e (f)))
 ;; into an enumerated tree like
-;; (1 a (2 b) (3 c (4 d)) (5 e (6 f)))
+;; ($1 a ($2 b) ($3 c (4 d)) ($5 e ($6 f)))
 (define (enumerate-tree t)
-  (define ec 0)
-  (define (enum t)
-    (if (symbol? t)
-        t
-        (begin
-          (set! ec (+ ec 1))
-          (let ([ec2 ec])
-            (pair ec2 (map enum t))))))
-  (enum t))
+  (if (symbol? t)
+      t
+      (pair (sym '$) (map enumerate-tree t))))
 
 ;; list all (enumerated) subtrees
-(define (all-enum-subtrees t)
+(define (all-subtrees t)
   (let loop ([t (list t)])
     (cond [(null? t) '()]
           [(number? (first t)) (loop (rest t))]
@@ -107,8 +135,8 @@
 
 ;; anti-unify all combinations of subtrees
 (define (common-subtrees et1 et2 ignore-id-matches)
-  (let ([sts1 (all-enum-subtrees et1)]
-        [sts2 (all-enum-subtrees et2)])
+  (let ([sts1 (all-subtrees et1)]
+        [sts2 (all-subtrees et2)])
     (apply append
            (map (lambda (st1)
                   (map (lambda (st2)
