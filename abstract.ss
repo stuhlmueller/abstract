@@ -5,7 +5,6 @@
 ;; - for self-matches, don't both compare subtree A to B and B to A, only one direction
 ;; - compress original expr using abstraction
 ;;   (in all places, not only the two that were used to find the abstraction)
-;; - enumerate should generate unique ids, not numbers
 
 (import (except (rnrs) string-hash string-ci-hash)
         (only (ikarus) set-car! set-cdr!)
