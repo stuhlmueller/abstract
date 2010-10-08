@@ -112,26 +112,38 @@
 ;; (z (a (x (* (*)) (h (m)))) (c) (d * (i)))
 (define anti-unify
   (mem (lambda (et1 et2 ignore-id-matches)
-         (cond [(and (symbol? et1) (symbol? et2)) (if (eq? et1 et2) et1 '*)]
-               [(or (symbol? et1) (symbol? et2)) '*]
-               [(and ignore-id-matches (eqv? (etree->id et1) (etree->id et2))) #f]
-               [(not (eqv? (length et1) (length et2))) '*]
-               [else
-                (let ([unified-tree (map (lambda (t1 t2) (anti-unify t1 t2 ignore-id-matches))
-                                         (etree->tree et1) (etree->tree et2))])
-                  (if (any (lambda (st) (eq? st #f)) unified-tree)
-                      #f
-                      unified-tree))]))))
+         (begin 
+           (define variables '())
+           (define (add-variable!)
+             (begin 
+               (set! variables (pair (sym 'x) variables))
+               (first variables)))
+           (define (build-pattern et1 et2 ignore-id-matches)
+             (cond [(and (symbol? et1) (symbol? et2)) (if (eq? et1 et2) et1 (add-variable!))]
+                   [(or (symbol? et1) (symbol? et2)) (add-variable!)]
+                   [(and ignore-id-matches (eqv? (etree->id et1) (etree->id et2))) #f]
+                   [(not (eqv? (length et1) (length et2))) (add-variable!)]
+                   [else
+                    (let ([unified-tree (map (lambda (t1 t2) (build-pattern t1 t2 ignore-id-matches))
+                                             (etree->tree et1) (etree->tree et2))])
+                      (if (any (lambda (st) (eq? st #f)) unified-tree)
+                          #f
+                          unified-tree))]))
+           (let ((pattern (build-pattern et1 et2 ignore-id-matches)))
+             (list variables pattern))))))
+
 
 ;; filters out a few uninteresting results (singleton, *, and tree of
 ;; only *s)
 (define (filtered-anti-unify et1 et2 ignore-id-matches)
-  (let ([result (anti-unify et1 et2 ignore-id-matches)])
-    (if (or (eq? result '*)
-            (singleton? result)
-            (and (list? result) (all-val? result '*)))
-        #f
-        result)))
+  (let* ([variables-pattern (anti-unify et1 et2 ignore-id-matches)]
+        [variables (first variables-pattern)]
+        [pattern (second variables-pattern)])
+    (begin
+      (if (or (member pattern variables)
+              (singleton? pattern))
+          #f
+          variables-pattern))))
 
 ;; anti-unify all combinations of subtrees
 (define (common-subtrees et1 et2 ignore-id-matches)
@@ -168,7 +180,3 @@
 
 (test)
 
-(define bad '((a) (a)))
-(enumerate-tree bad)
-(all-enum-subtrees bad)
-(anti-unify '(a b) '(a b) #t)
