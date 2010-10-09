@@ -162,7 +162,7 @@
            (let ([pattern (build-pattern et1 et2 ignore-id-matches)])
              (list variables pattern))))))
 
-;; filter out a few uninteresting abstractions
+;; replcae a few uninteresting abstractions with #f
 ;; (single variable or singleton list)
 (define (filtered-anti-unify et1 et2 ignore-id-matches)
   (let* ([variables-pattern (anti-unify et1 et2 ignore-id-matches)]
@@ -181,19 +181,18 @@
 
 ;; anti-unify all combinations of subtrees
 (define (common-subtrees et1 et2 ignore-id-matches)
+  (define (fau st1 st2)
+    (list st1 st2 (filtered-anti-unify st1 st2 ignore-id-matches)))
   (let ([sts1 (all-subtrees et1)]
         [sts2 (all-subtrees et2)])
     (apply append
-           (map (lambda (st1)
-                  (map (lambda (st2)
-                         (list st1 st2 (filtered-anti-unify st1 st2 ignore-id-matches)))
-                         sts2))
-                       sts1))))
+           (map (lambda (st1) (map (lambda (st2) (fau st1 st2)) sts2)) sts1))))
 
-;; return all subtrees that enumerated tree et has in common with
-;; itself, ignore identity matches
+;; return abstractions for all subtrees that enumerated tree et has in
+;; common with itself, ignore identity matches
 (define (self-matches et)
   (common-subtrees et et #t))
+
 
 ;; takes a sexpr (s), a sexpr with variables (sv) and a proc name, e.g.
 ;; s = (foo (foo a b c) b c)
@@ -203,18 +202,20 @@
 ;; second (operand) pass: (P (P a))
 ;; returns #f if abstraction cannot be applied, otherwise variable assignments
 ;; ! assumes that each variable occurs only once in sv
-(define (unify s sv vars)
-  (define (variable? obj)
-    (member obj vars))
-  (cond [(variable? sv) (list (pair sv s))]
-        [(and (symbol? s) (symbol? sv)) (if (eq? s sv) '() #f)]
-        [(or (symbol? s) (symbol? sv)) #f]
-        [(not (eqv? (length s) (length sv))) #f]
-        [else
-         (let ([assignments (map (lambda (si sj) (unify si sj vars)) s sv)])
-           (if (any false? assignments)
-               #f
-               (apply append assignments)))]))
+(define unify
+  (mem (lambda (s sv vars)
+         (begin
+           (define (variable? obj)
+             (member obj vars))
+           (cond [(variable? sv) (list (pair sv s))]
+                 [(and (symbol? s) (symbol? sv)) (if (eq? s sv) '() #f)]
+                 [(or (symbol? s) (symbol? sv)) #f]
+                 [(not (eqv? (length s) (length sv))) #f]
+                 [else
+                  (let ([assignments (map (lambda (si sj) (unify si sj vars)) s sv)])
+                    (if (any false? assignments)
+                        #f
+                        (apply append assignments)))])))))
 
 ;; doesn't deal with partial matches, could use more error checking
 (define (replace-matches s abstraction)
@@ -228,6 +229,7 @@
         (pair (abstraction->name abstraction)
               (map (lambda (var) (replace-matches (rest (assq var unified-vars)) abstraction))
                    (abstraction->vars abstraction))))))
+
 
 ;rewrite the expression in terms of the patterns found from self-matching, returns the compressed programs and their sizes 
 (define (compressions tree)
@@ -246,6 +248,10 @@
 (define (get-valid-abstractions subtree-matches)
   (let ((abstractions (map third subtree-matches)))
     (filter (lambda (x) x) abstractions)))
+
+
+
+;; testing
 
 
 (define (pretty-print-match m)
