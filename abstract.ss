@@ -298,7 +298,9 @@
                   "m: " (abstraction->pattern (third m)) "\n\n")))
 
 (define (pretty-print-program program)
-  (pretty-print (program->sexpr program)))
+  (let ([sexpr (program->sexpr program)])
+    (pretty-print sexpr)
+    (for-each display (list "size: " (size sexpr) "\n\n"))))
 
 (define (test-self-matching)
   (let* ([test-tree '(((u) b y (a (b (c d e)) f g) x (a c))
@@ -323,7 +325,9 @@
     (pretty-print (replace-matches test-tree abstraction))))
 
 (define (test-compression sexpr)
-  (for-each display (list "original expr:\n" sexpr "\n\n"
+  (for-each display (list "original expr:\n" sexpr "\n"
+                          "size: " (size sexpr)
+                          "\n\n"
                           "compressed exprs:\n"))
   (map pretty-print-program
        (unique-programs
@@ -331,7 +335,10 @@
          (make-program '() sexpr)))))
 
 (test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
-;; (test-compression '(f (a b) (a b)))
+;; (test-compression '(f (a b (x y (u k l)))
+;;                       (a b c)
+;;                       (a b (z d (u k l)))
+;;                       (a b c)))
 ;(test-self-matching)
 ;(test-match-replacement)
 ;(self-matches (enumerate-tree '(a (d e) (d e))))
