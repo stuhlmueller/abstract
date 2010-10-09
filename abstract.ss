@@ -265,7 +265,7 @@
          [compressed-programs (map (curry compress-program program) valid-abstractions)]
          [program-size (size (program->sexpr program))]
          [valid-compressed-programs (filter (lambda (cp) (<= (size (program->sexpr cp))
-                                                       program-size))
+                                                        (+ program-size 2)))
                                             compressed-programs)])
     valid-compressed-programs))
 
@@ -331,6 +331,7 @@
          (make-program '() sexpr)))))
 
 (test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
+;; (test-compression '(f (a b) (a b)))
 ;(test-self-matching)
 ;(test-match-replacement)
 ;(self-matches (enumerate-tree '(a (d e) (d e))))
