@@ -84,6 +84,7 @@
                               val))))))
 
 
+
 ;; data structures
 
 (define etree->id first)
@@ -248,7 +249,7 @@
 (define (get-valid-abstractions subtree-matches)
   (let ((abstractions (map third subtree-matches)))
     (filter (lambda (x) x) abstractions)))
-
+;;;recursive compression
 
 
 ;; testing
