@@ -11,12 +11,22 @@
         (_srfi :69)
         (church readable-scheme))
 
+(define (curry fun . args)
+  (lambda x
+    (apply fun (append args x))))
+
 (define (all lst)
   (if (null? lst)
       #t
       (and (first lst)
            (all (rest lst)))))
 
+;compute the number of nodes in a tree
+(define (size tree)
+  (if (list? tree)
+      (+ 1 (apply + (map size tree)))
+      1))
+      
 
 ;; look up value for key in alist; if not found,
 ;; set (default-thunk) as value and return it
@@ -85,6 +95,13 @@
 (define abstraction->name second)
 (define abstraction->vars third)
 (define abstraction->pattern fourth)
+
+;make a define statement out of an abstraction
+(define (abstraction->procedure abstraction)
+  (let ((name (abstraction->name abstraction))
+        (variables (abstraction->vars abstraction))
+        (pattern (abstraction->pattern abstraction)))
+    (list 'define (pair name variables) pattern)))
 
 
 ;; transforms a tree like
@@ -212,6 +229,25 @@
               (map (lambda (var) (replace-matches (rest (assq var unified-vars)) abstraction))
                    (abstraction->vars abstraction))))))
 
+;rewrite the expression in terms of the patterns found from self-matching, returns the compressed programs and their sizes 
+(define (compressions tree)
+  (let* ((etree (enumerate-tree tree))
+         (valid-abstractions (get-valid-abstractions (self-matches etree)))
+         (compressed-trees (map (curry compress-tree tree) valid-abstractions)))
+    (zip compressed-trees (map size compressed-trees))))
+
+;compress a tree using the given abstraction
+(define (compress-tree tree abstraction)
+  (let* ((proc (abstraction->procedure abstraction))
+         (compression (replace-matches tree abstraction)))
+    (list 'begin proc compression)))
+
+;throw out any that are false
+(define (get-valid-abstractions subtree-matches)
+  (let ((abstractions (map third subtree-matches)))
+    (filter (lambda (x) x) abstractions)))
+
+
 (define (pretty-print-match m)
   (for-each display
             (list "t1: " (unenumerate-tree (first m)) "\n"
@@ -234,5 +270,11 @@
          [abstraction (make-abstraction '(X b c) '(X))])
     (pretty-print (replace-matches test-tree abstraction))))
 
-(test-self-matching)
+(define (test-compression)
+  (pretty-print (compressions '(f a (f a (f a b c) c) c))))
 
+(test-compression)
+;(test-self-matching)
+;(test-match-replacement)
+;(self-matches (enumerate-tree '(a (d e) (d e))))
+;(exit)
