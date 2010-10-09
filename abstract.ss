@@ -145,7 +145,7 @@
            (let ([pattern (build-pattern et1 et2 ignore-id-matches)])
              (list variables pattern))))))
 
-;; filter out a few uninteresting abstractions
+;; replcae a few uninteresting abstractions with #f
 ;; (single variable or singleton list)
 (define (filtered-anti-unify et1 et2 ignore-id-matches)
   (let* ([variables-pattern (anti-unify et1 et2 ignore-id-matches)]
@@ -164,19 +164,18 @@
 
 ;; anti-unify all combinations of subtrees
 (define (common-subtrees et1 et2 ignore-id-matches)
+  (define (fau st1 st2)
+    (list st1 st2 (filtered-anti-unify st1 st2 ignore-id-matches)))
   (let ([sts1 (all-subtrees et1)]
         [sts2 (all-subtrees et2)])
     (apply append
-           (map (lambda (st1)
-                  (map (lambda (st2)
-                         (list st1 st2 (filtered-anti-unify st1 st2 ignore-id-matches)))
-                         sts2))
-                       sts1))))
+           (map (lambda (st1) (map (lambda (st2) (fau st1 st2)) sts2)) sts1))))
 
-;; return all subtrees that enumerated tree et has in common with
-;; itself, ignore identity matches
+;; return abstractions for all subtrees that enumerated tree et has in
+;; common with itself, ignore identity matches
 (define (self-matches et)
   (common-subtrees et et #t))
+
 
 ;; takes a sexpr (s), a sexpr with variables (sv) and a proc name, e.g.
 ;; s = (foo (foo a b c) b c)
@@ -214,6 +213,9 @@
               (map (lambda (var) (replace-matches (rest (assq var unified-vars)) abstraction))
                    (abstraction->vars abstraction))))))
 
+
+;; testing
+
 (define (pretty-print-match m)
   (for-each display
             (list "t1: " (unenumerate-tree (first m)) "\n"
@@ -236,5 +238,5 @@
          [abstraction (make-abstraction '(X b c) '(X))])
     (pretty-print (replace-matches test-tree abstraction))))
 
-(test-match-replacement)
+(test-self-matching)
 
