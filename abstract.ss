@@ -1,9 +1,11 @@
 #!r6rs
 
 ;; TODO:
+;; - when different variables of a function refer to same structure in
+;;   the program at all calls to the function, collapse them
+;; - at [1], when variables are part of a pattern, make the pattern more general
+;;   such that the variables are given in the function call
 ;; - for self-matches, don't both compare subtree A to B and B to A, only one direction
-;; - compress original expr using abstraction
-;;   (in all places, not only the two that were used to find the abstraction)
 
 (import (except (rnrs) string-hash string-ci-hash)
         (only (ikarus) set-car! set-cdr!)
@@ -11,9 +13,9 @@
         (_srfi :69)
         (church readable-scheme))
 
-(define (curry fun . args)
-  (lambda x
-    (apply fun (append args x))))
+(define (curry fun . const-args)
+  (lambda args
+    (apply fun (append const-args args))))
 
 (define (all lst)
   (if (null? lst)
@@ -24,7 +26,9 @@
 ;compute the number of nodes in a tree
 (define (size tree)
   (if (list? tree)
-      (+ 1 (apply + (map size tree)))
+      (cond [(tagged-list? tree 'begin) (size (rest tree))] ;; ignore 'begin symbol
+            [(tagged-list? tree 'define) (size (cddr tree))] ;; ignore 'define symbol + args
+            [else (+ 1 (apply + (map size tree)))])
       1))
       
 
@@ -91,17 +95,29 @@
 (define etree->children cddr)
 
 (define (make-abstraction pattern variables)
-  (list 'abstraction (sym 'F) variables pattern))
+  (make-named-abstraction (sym 'F) pattern variables))
+(define (make-named-abstraction name pattern variables)
+  (list 'abstraction name variables pattern))
 (define abstraction->name second)
 (define abstraction->vars third)
 (define abstraction->pattern fourth)
 
 ;make a define statement out of an abstraction
-(define (abstraction->procedure abstraction)
+(define (abstraction->define abstraction)
   (let ((name (abstraction->name abstraction))
         (variables (abstraction->vars abstraction))
         (pattern (abstraction->pattern abstraction)))
     (list 'define (pair name variables) pattern)))
+
+(define (make-program abstractions body)
+  (list 'program abstractions body))
+(define program->abstractions second)
+(define program->body third)
+
+(define (program->sexpr program)
+  `(begin
+     ,@(map abstraction->define (program->abstractions program))
+     ,(program->body program)))
 
 
 ;; transforms a tree like
@@ -231,34 +247,58 @@
                    (abstraction->vars abstraction))))))
 
 
-;rewrite the expression in terms of the patterns found from self-matching, returns the compressed programs and their sizes 
-(define (compressions tree)
-  (let* ((etree (enumerate-tree tree))
-         (valid-abstractions (get-valid-abstractions (self-matches etree)))
-         (compressed-trees (map (curry compress-tree tree) valid-abstractions)))
-    (zip compressed-trees (map size compressed-trees))))
-
-;compress a tree using the given abstraction
-(define (compress-tree tree abstraction)
-  (let* ((proc (abstraction->procedure abstraction))
-         (compression (replace-matches tree abstraction)))
-    (list 'begin proc compression)))
-
-;throw out any that are false
+;; throw out any matches that are #f
 (define (get-valid-abstractions subtree-matches)
-  (let ((abstractions (map third subtree-matches)))
+  (let ([abstractions (map third subtree-matches)])
     (filter (lambda (x) x) abstractions)))
 
+;; joins definitions and program body into one big list
+(define (condense-program program)
+  `(,@(map abstraction->pattern (program->abstractions program))
+    ,(program->body program)))
+
+;; compute a list of compressed programs
+(define (compressions program)
+  (let* ([condensed-program (condense-program program)]
+         [abstractions (self-matches (enumerate-tree condensed-program))]
+         [valid-abstractions (get-valid-abstractions abstractions)] ;; [1]
+         [compressed-programs (map (curry compress-program program) valid-abstractions)]
+         [program-size (size (program->sexpr program))]
+         [valid-compressed-programs (filter (lambda (cp) (<= (size (program->sexpr cp))
+                                                       program-size))
+                                            compressed-programs)])
+    valid-compressed-programs))
+
+;; both compressee and compressor are abstractions
+(define (compress-abstraction compressor compressee)
+  (make-named-abstraction (abstraction->name compressee)
+                          (replace-matches (abstraction->pattern compressee) compressor)
+                          (abstraction->vars compressee)))
+
+(define (compress-program program abstraction)
+  (let* ([compressed-abstractions (map (curry compress-abstraction abstraction)
+                                       (program->abstractions program))]
+         [compressed-body (replace-matches (program->body program) abstraction)])
+    (make-program (pair abstraction compressed-abstractions)
+                  compressed-body)))
+
+;; iteratively compress program, computing all entries of full (semi)lattice
+(define (iterated-compressions program)
+  (let ([compressed-programs (compressions program)])
+    (append compressed-programs
+            (apply append (map iterated-compressions compressed-programs)))))
 
 
 ;; testing
-
 
 (define (pretty-print-match m)
   (for-each display
             (list "t1: " (unenumerate-tree (first m)) "\n"
                   "t2: " (unenumerate-tree (second m)) "\n"
                   "m: " (abstraction->pattern (third m)) "\n\n")))
+
+(define (pretty-print-program program)
+  (pretty-print (program->sexpr program)))
 
 (define (test-self-matching)
   (let* ([test-tree '(((u) b y (a (b (c d e)) f g) x (a c))
@@ -271,15 +311,26 @@
          (filter (lambda (m) (third m))
                  (self-matches enum-test-tree)))))
 
+;; assumes that there is only one program for each size
+(define (unique-programs programs)
+  (define ht (make-hash-table eqv?))
+  (map (lambda (p) (hash-table-set! ht (size (program->sexpr p)) p)) programs)
+  (map rest (hash-table->alist ht)))
+
 (define (test-match-replacement)
   (let* ([test-tree '(e f ((d (a b c)) b c) g h)]
          [abstraction (make-abstraction '(X b c) '(X))])
     (pretty-print (replace-matches test-tree abstraction))))
 
-(define (test-compression)
-  (pretty-print (compressions '(f a (f a (f a b c) c) c))))
+(define (test-compression sexpr)
+  (for-each display (list "original expr:\n" sexpr "\n\n"
+                          "compressed exprs:\n"))
+  (map pretty-print-program
+       (unique-programs
+        (iterated-compressions
+         (make-program '() sexpr)))))
 
-(test-compression)
+(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
 ;(test-self-matching)
 ;(test-match-replacement)
 ;(self-matches (enumerate-tree '(a (d e) (d e))))
