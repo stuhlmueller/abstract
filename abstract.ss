@@ -28,12 +28,12 @@
       lst
       (take lst n)))
 
-;compute the number of nodes in a tree
+;compute the size of a program
 (define (size tree)
   (if (list? tree)
       (cond [(tagged-list? tree 'begin) (size (rest tree))] ;; ignore 'begin symbol
             [(tagged-list? tree 'define) (size (cddr tree))] ;; ignore 'define symbol + args
-            [else (+ 1 (apply + (map size tree)))])
+            [else (apply + (map size tree))])
       1))
       
 
@@ -285,7 +285,7 @@
          [compressed-programs (map (curry compress-program program) valid-abstractions)]
          [program-size (size (program->sexpr program))]
          [valid-compressed-programs (filter (lambda (cp) (<= (size (program->sexpr cp))
-                                                        (+ program-size 2)))
+                                                        program-size))
                                             compressed-programs)])
     valid-compressed-programs))
 
