@@ -285,7 +285,7 @@
          [compressed-programs (map (curry compress-program program) valid-abstractions)]
          [program-size (size (program->sexpr program))]
          [valid-compressed-programs (filter (lambda (cp) (<= (size (program->sexpr cp))
-                                                        program-size))
+                                                        (+ program-size 1)))
                                             compressed-programs)])
     valid-compressed-programs))
 
@@ -362,6 +362,7 @@
         (unique-programs
          (beam-search-compressions 2 (make-program '() sexpr))))))
 
+;; (test-compression '(a (a (foo) b) (a (bar) b)))
 ;; (test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
 (test-compression '(k (h (g (f (a b (x y (u k l)))
                                (a b c)
