@@ -13,22 +13,6 @@
         (_srfi :69)
         (church readable-scheme))
 
-;; eventually use this in for self-matching of subtrees
-(define (unique-commutative-pairs lst func)
-  (begin
-    (define (recursion lst1 lst2)
-      (if (null? lst2)
-          '()
-          (let ((from1 (first lst1)))
-            (append (map (lambda (from2) (func from1 from2)) lst2) (recursion (rest lst1) (rest lst2))))))
-    (recursion lst (rest lst))))
-
-
-(define (sexp-replace old new sexp)
-  (if (list? sexp)
-      (map (curry sexp-replace old new) sexp)
-      (if (equal? sexp old) new sexp)))
-
 
 (define (curry fun . const-args)
   (lambda args
@@ -39,9 +23,6 @@
       #t
       (and (first lst)
            (all (rest lst)))))
-
-
-;; compute the number of nodes in a tree
 
 (define (max-take lst n)
   (if (<= (length lst) n)
@@ -55,6 +36,21 @@
             [(tagged-list? tree 'define) (size (cddr tree))] ;; ignore 'define symbol + args
             [else (apply + (map size tree))])
       1))
+
+(define (sexp-replace old new sexp)
+  (if (list? sexp)
+      (map (curry sexp-replace old new) sexp)
+      (if (equal? sexp old) new sexp)))
+
+;; eventually use this in for self-matching of subtrees
+(define (unique-commutative-pairs lst func)
+  (define (recursion lst1 lst2)
+    (if (null? lst2)
+        '()
+        (let ((from1 (first lst1)))
+          (append (map (lambda (from2) (func from1 from2)) lst2)
+                  (recursion (rest lst1) (rest lst2))))))
+  (recursion lst (rest lst)))
 
 
 ;; look up value for key in alist; if not found,
@@ -113,7 +109,6 @@
                                    val))))))
 
 
-
 ;; data structures & associated functions
 
 (define etree->id first)
@@ -145,6 +140,21 @@
      ,@(map abstraction->define (program->abstractions program))
      ,(program->body program)))
 
+;; FIXME: assumes that there is only one program for each size
+(define (unique-programs programs)
+  (define ht (make-hash-table eqv?))
+  (map (lambda (p) (hash-table-set! ht (size (program->sexpr p)) p)) programs)
+  (map rest (hash-table->alist ht)))
+
+(define (sort-by-size programs)
+  (let* ([program-sizes (map (compose size program->sexpr) programs)]
+         [programs-with-size (zip programs program-sizes)]
+         [size< (lambda (a b) (< (second a) (second b)))])
+    (map first (list-sort size< programs-with-size))))
+
+(define (shortest-n n programs)
+  (max-take (sort-by-size programs) n))
+
 
 ;; a history of how each pattern was used, the keys to the hashtable
 ;; are names of abstractions and the entries are hashtables where the
@@ -166,7 +176,8 @@
                new-history)))])
     (abstraction-history->add! abstraction-history unified-vars)))
 
-;;;entries into the abstraction-instances table, basically a list of instances for each variable of the abstraction
+;; entries into the abstraction-instances table, basically a list of
+;; instances for each variable of the abstraction
 (define (make-abstraction-history abstraction-vars)
   (let* ([new-history (make-hash-table eqv?)]
          [add-var! (lambda (var) (hash-table-set! new-history var '()))])
@@ -174,7 +185,6 @@
     new-history))
 
 (define abstraction-history->var-history hash-table-ref)
-
 
 ;; add a new instance to an abstractions history
 (define (abstraction-history->add! ahist unified-vars)
@@ -188,7 +198,8 @@
 (define unified-var->var first)
 (define unified-var->instance rest)
 
-;;;remove redundant variables for an abstraction e.g. (+ 2 2) (+ 3 3) gives pattern (+ x y), but we'd like (+ z z)
+;; remove redundant variables for an abstraction e.g. (+ 2 2) (+ 3 3)
+;; gives pattern (+ x y), but we'd like (+ z z)
 (define (check/reduce-redundant-pair abstraction var1 var2)
   (let* ([vars (abstraction->vars abstraction)]
          [ahist (abstraction-instances->get-instances abstraction)]
@@ -207,7 +218,6 @@
          [old-name (abstraction->name abstraction)])
     (make-named-abstraction old-name new-pattern new-variables)))
 
-
 (define (remove-redundant-variables abstraction)
   (if (not (applied? abstraction))
       abstraction
@@ -223,25 +233,10 @@
                     (same-abstraction-recursion (rest var-pairs))))))
         (same-abstraction-recursion var-pairs))))
 
-;make this nicer
 (define (applied? abstraction)
-  (hash-table-ref abstraction-instances (abstraction->name abstraction) (lambda () #f)))
-
-;; FIXME: assumes that there is only one program for each size
-(define (unique-programs programs)
-  (define ht (make-hash-table eqv?))
-  (map (lambda (p) (hash-table-set! ht (size (program->sexpr p)) p)) programs)
-  (map rest (hash-table->alist ht)))
-
-(define (sort-by-size programs)
-  (let* ([program-sizes (map (compose size program->sexpr) programs)]
-         [programs-with-size (zip programs program-sizes)]
-         [size< (lambda (a b) (< (second a) (second b)))])
-    (map first (list-sort size< programs-with-size))))
-
-(define (shortest-n n programs)
-  (max-take (sort-by-size programs) n))
-
+  (hash-table-ref abstraction-instances
+                  (abstraction->name abstraction)
+                  (lambda () #f)))
 
 
 ;; transforms a tree like
@@ -470,17 +465,18 @@
         (unique-programs
          (beam-search-compressions 2 (make-program '() sexpr))))))
 
-(define (test-redundant-variable)
+(define (test-redundant-variables)
   (let* ([tabs (make-abstraction '(+ A B C D) '(A B C D))]
          [test-trees '((+ a b b a) (+ q d d q) (+ f m m f))])
 ;         [test-trees '((+ 2 3 3 2) (+ 4 5 5 4) (+ 6 1 1 6))])
     (map (lambda (x) (replace-matches x tabs)) test-trees)
+    (pretty-print test-trees)    
     (pretty-print tabs)
     (pretty-print (remove-redundant-variables tabs))))
 
-;; (test-redundant-variable)
+(test-redundant-variables)
 
-(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
+;; (test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
 ;; (test-compression '(f (a b (x y (u k l)))
 ;;                       (a b c)
 ;;                       (a b (z d (u k l)))
