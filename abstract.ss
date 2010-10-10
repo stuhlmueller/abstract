@@ -13,7 +13,7 @@
         (_srfi :69)
         (church readable-scheme))
 
-;eventually use this in for self-matching of subtrees
+;; eventually use this in for self-matching of subtrees
 (define (unique-commutative-pairs lst func)
   (begin
     (define (recursion lst1 lst2)
@@ -41,14 +41,14 @@
            (all (rest lst)))))
 
 
-                                        ;compute the number of nodes in a tree
+;; compute the number of nodes in a tree
 
 (define (max-take lst n)
   (if (<= (length lst) n)
       lst
       (take lst n)))
 
-;compute the size of a program
+;; compute the size of a program
 (define (size tree)
   (if (list? tree)
       (cond [(tagged-list? tree 'begin) (size (rest tree))] ;; ignore 'begin symbol
@@ -128,7 +128,7 @@
 (define abstraction->vars third)
 (define abstraction->pattern fourth)
 
-                                        ;make a define statement out of an abstraction
+;; make a define statement out of an abstraction
 (define (abstraction->define abstraction)
   (let ((name (abstraction->name abstraction))
         (variables (abstraction->vars abstraction))
@@ -146,7 +146,10 @@
      ,(program->body program)))
 
 
-;;;a history of how each pattern was used, the keys to the hashtable are names of abstractions and the entries are hashtables where the keys are variable names for the abstractions and the values are lists of past instances  
+;; a history of how each pattern was used, the keys to the hashtable
+;; are names of abstractions and the entries are hashtables where the
+;; keys are variable names for the abstractions and the values are
+;; lists of past instances
 (define abstraction-instances (make-hash-table eqv?))
 (define (abstraction-instances->get-instances abstraction)
   (hash-table-ref abstraction-instances (abstraction->name abstraction)))
@@ -173,7 +176,7 @@
 (define abstraction-history->var-history hash-table-ref)
 
 
-                                        ;add a new instance to an abstractions history
+;; add a new instance to an abstractions history
 (define (abstraction-history->add! ahist unified-vars)
   (begin
     (define (update-var! unified-var)
@@ -195,7 +198,7 @@
         (abstraction->combine-variables abstraction var1 var2)
         #f)))
 
-                                        ;remove variable2 and replace all instances in the pattern with variable1
+;; remove variable2 and replace all instances in the pattern with variable1
 (define (abstraction->combine-variables abstraction var1 var2)
   (let* ([old-pattern (abstraction->pattern abstraction)]
          [new-pattern (sexp-replace var2 var1 old-pattern)]
@@ -463,10 +466,10 @@
                           "\n\n"
                           "compressed exprs:\n"))
   (map pretty-print-program
-       (unique-programs
-        (iterated-compressions
-         (make-program '() sexpr)))))
-'b
+       (sort-by-size
+        (unique-programs
+         (beam-search-compressions 2 (make-program '() sexpr))))))
+
 (define (test-redundant-variable)
   (let* ([tabs (make-abstraction '(+ A B C D) '(A B C D))]
          [test-trees '((+ a b b a) (+ q d d q) (+ f m m f))])
@@ -475,57 +478,48 @@
     (pretty-print tabs)
     (pretty-print (remove-redundant-variables tabs))))
 
-(test-redundant-variable)
-;(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
+;; (test-redundant-variable)
+
+(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
 ;; (test-compression '(f (a b (x y (u k l)))
 ;;                       (a b c)
 ;;                       (a b (z d (u k l)))
 ;;                       (a b c)))
-
-       (sort-by-size
-        (unique-programs
-         (beam-search-compressions 2 (make-program '() sexpr))))))
-
-;; (test-compression '(a (a (foo) b) (a (bar) b)))
+;; (test-compression '(a (a (foo bar) b) (a (bar foo) b) (a (bzar fzoo) b)))
 ;; (test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
-(test-compression '(k (h (g (f (a b (x y (u k l)))
-                               (a b c)
-                               (a b (z d (u k l)))
-                               (a b c))
-                            (f (a b (x y (u k l)))
-                               (a b c)
-                               (a b (z d (u k l)))
-                               (a b c)))
-                         (g (f (a b (x y (u k l)))
-                               (a b c)
-                               (a b (z d (u k l)))
-                               (a b c))
-                            (f (a b (x y (u k l)))
-                               (a b c)
-                               (a b (z d (u k l)))
-                               (a b c))))
-                      (h (g (f (a b (x y (u k l)))
-                               (a b c)
-                               (a b (z d (u k l)))
-                               (a b c))
-                            (f (a b (x y (u k l)))
-                               (a b c)
-                               (a b (z d (u k l)))
-                               (a b c)))
-                         (g (f (a b (x y (u k l)))
-                               (a b c)
-                               (a b (z d (u k l)))
-                               (a b c))
-                            (f (a b (x y (u k l)))
-                               (a b c)
-                               (a b (z d (u k l)))
-                               (a b c))))))
+;; (test-compression '(k (h (g (f (a b (x y (u k l)))
+;;                                (a b c)
+;;                                (a b (z d (u k l)))
+;;                                (a b c))
+;;                             (f (a b (x y (u k l)))
+;;                                (a b c)
+;;                                (a b (z d (u k l)))
+;;                                (a b c)))
+;;                          (g (f (a b (x y (u k l)))
+;;                                (a b c)
+;;                                (a b (z d (u k l)))
+;;                                (a b c))
+;;                             (f (a b (x y (u k l)))
+;;                                (a b c)
+;;                                (a b (z d (u k l)))
+;;                                (a b c))))
+;;                       (h (g (f (a b (x y (u k l)))
+;;                                (a b c)
+;;                                (a b (z d (u k l)))
+;;                                (a b c))
+;;                             (f (a b (x y (u k l)))
+;;                                (a b c)
+;;                                (a b (z d (u k l)))
+;;                                (a b c)))
+;;                          (g (f (a b (x y (u k l)))
+;;                                (a b c)
+;;                                (a b (z d (u k l)))
+;;                                (a b c))
+;;                             (f (a b (x y (u k l)))
+;;                                (a b c)
+;;                                (a b (z d (u k l)))
+;;                                (a b c))))))
 
-;(test-self-matching)
-;(test-match-replacement)
-
-;(self-matches (enumerate-tree '(a (d e) (d e))))
-;(exit)
 
 
 
