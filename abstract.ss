@@ -2,16 +2,33 @@
 
 ;; TODO:
 ;; - when different variables of a function refer to same structure in
-;;   the program at all calls to the function, collapse them
+;;   the program at all calls to the function, collapse them, remove-redundant-variables will do this, but before adding to compression make sure we can handle same variables
 ;; - at [1], when variables are part of a pattern, make the pattern more general
 ;;   such that the variables are given in the function call
-;; - for self-matches, don't both compare subtree A to B and B to A, only one direction
+;; - for self-matches, don't both compare subtree A to B and B to A, only one direction, use unieque-commutative-pairs function
 
 (import (except (rnrs) string-hash string-ci-hash)
         (only (ikarus) set-car! set-cdr!)
         (_srfi :1)
         (_srfi :69)
         (church readable-scheme))
+
+;eventually use this in for self-matching of subtrees
+(define (unique-commutative-pairs lst func)
+  (begin
+    (define (recursion lst1 lst2)
+      (if (null? lst2)
+          '()
+          (let ((from1 (first lst1)))
+            (append (map (lambda (from2) (func from1 from2)) lst2) (recursion (rest lst1) (rest lst2))))))
+    (recursion lst (rest lst))))
+
+
+(define (sexp-replace old new sexp)
+  (if (list? sexp)
+      (map (curry sexp-replace old new) sexp)
+      (if (equal? sexp old) new sexp)))
+
 
 (define (curry fun . const-args)
   (lambda args
@@ -23,14 +40,14 @@
       (and (first lst)
            (all (rest lst)))))
 
-;compute the number of nodes in a tree
+                                        ;compute the number of nodes in a tree
 (define (size tree)
   (if (list? tree)
       (cond [(tagged-list? tree 'begin) (size (rest tree))] ;; ignore 'begin symbol
             [(tagged-list? tree 'define) (size (cddr tree))] ;; ignore 'define symbol + args
             [else (+ 1 (apply + (map size tree)))])
       1))
-      
+
 
 ;; look up value for key in alist; if not found,
 ;; set (default-thunk) as value and return it
@@ -84,8 +101,8 @@
       (hash-table-ref mt
                       args
                       (lambda () (let ([val (apply f args)])
-                              (hash-table-set! mt args val)
-                              val))))))
+                                   (hash-table-set! mt args val)
+                                   val))))))
 
 
 
@@ -103,7 +120,7 @@
 (define abstraction->vars third)
 (define abstraction->pattern fourth)
 
-;make a define statement out of an abstraction
+                                        ;make a define statement out of an abstraction
 (define (abstraction->define abstraction)
   (let ((name (abstraction->name abstraction))
         (variables (abstraction->vars abstraction))
@@ -120,6 +137,83 @@
      ,@(map abstraction->define (program->abstractions program))
      ,(program->body program)))
 
+;;;a history of how each pattern was used, the keys to the hashtable are names of abstractions and the entries are hashtables where the keys are variable names for the abstractions and the values are lists of past instances  
+(define abstraction-instances (make-hash-table eqv?))
+(define (abstraction-instances->get-instances abstraction)
+  (hash-table-ref abstraction-instances (abstraction->name abstraction)))
+(define (abstraction-instances->add-instance! abstraction unified-vars)
+  (let* ([aname (abstraction->name abstraction)]
+         [avars (abstraction->vars abstraction)]
+         [abstraction-history
+          (hash-table-ref
+           abstraction-instances
+           aname
+           (lambda ()
+             (let ([new-history (make-abstraction-history avars)])
+               (hash-table-set! abstraction-instances aname new-history)
+               new-history)))])
+    (abstraction-history->add! abstraction-history unified-vars)))
+
+;;;entries into the abstraction-instances table, basically a list of instances for each variable of the abstraction
+(define (make-abstraction-history abstraction-vars)
+  (let* ([new-history (make-hash-table eqv?)]
+         [add-var! (lambda (var) (hash-table-set! new-history var '()))])
+    (map add-var! abstraction-vars)
+    new-history))
+
+(define abstraction-history->var-history hash-table-ref)
+
+
+                                        ;add a new instance to an abstractions history
+(define (abstraction-history->add! ahist unified-vars)
+  (begin
+    (define (update-var! unified-var)
+      (let ([var (unified-var->var unified-var)]
+            [new-instance (unified-var->instance unified-var)])
+        (hash-table-update! ahist var (lambda (old-instances) (pair new-instance old-instances)))))
+    (map update-var! unified-vars)))
+
+(define unified-var->var first)
+(define unified-var->instance rest)
+
+;;;remove redundant variables for an abstraction e.g. (+ 2 2) (+ 3 3) gives pattern (+ x y), but we'd like (+ z z)
+(define (check/reduce-redundant-pair abstraction var1 var2)
+  (let* ([vars (abstraction->vars abstraction)]
+         [ahist (abstraction-instances->get-instances abstraction)]
+         [var1-history (abstraction-history->var-history ahist var1)]
+         [var2-history (abstraction-history->var-history ahist var2)])
+    (if (equal? var1-history var2-history)
+        (abstraction->combine-variables abstraction var1 var2)
+        #f)))
+
+                                        ;remove variable2 and replace all instances in the pattern with variable1
+(define (abstraction->combine-variables abstraction var1 var2)
+  (let* ([old-pattern (abstraction->pattern abstraction)]
+         [new-pattern (sexp-replace var2 var1 old-pattern)]
+         [old-variables (abstraction->vars abstraction)]
+         [new-variables (delete var2 old-variables)]
+         [old-name (abstraction->name abstraction)])
+    (make-named-abstraction old-name new-pattern new-variables)))
+
+
+(define (remove-redundant-variables abstraction)
+  (if (not (applied? abstraction))
+      abstraction
+      (let* ([vars (abstraction->vars abstraction)]
+             [var-pairs (unique-commutative-pairs vars list)])
+        (define (same-abstraction-recursion var-pairs)
+          (if (null? var-pairs)
+              abstraction
+              (let* ([var-pair (first var-pairs)]
+                     [pair-reduced (check/reduce-redundant-pair abstraction (first var-pair) (second var-pair))])
+                (if pair-reduced
+                    (remove-redundant-variables pair-reduced)
+                    (same-abstraction-recursion (rest var-pairs))))))
+        (same-abstraction-recursion var-pairs))))
+
+;make this nicer
+(define (applied? abstraction)
+  (hash-table-ref abstraction-instances (abstraction->name abstraction) (lambda () #f)))
 
 ;; transforms a tree like
 ;; (a (b) (c (d)) (e (f)))
@@ -243,9 +337,11 @@
         (if (list? s)
             (map (lambda (si) (replace-matches si abstraction)) s)
             s)
-        (pair (abstraction->name abstraction)
-              (map (lambda (var) (replace-matches (rest (assq var unified-vars)) abstraction))
-                   (abstraction->vars abstraction))))))
+        (begin
+          (abstraction-instances->add-instance! abstraction unified-vars)
+          (pair (abstraction->name abstraction)
+                (map (lambda (var) (replace-matches (rest (assq var unified-vars)) abstraction))
+                     (abstraction->vars abstraction)))))))
 
 
 ;; throw out any matches that are #f
@@ -266,7 +362,7 @@
          [compressed-programs (map (curry compress-program program) valid-abstractions)]
          [program-size (size (program->sexpr program))]
          [valid-compressed-programs (filter (lambda (cp) (<= (size (program->sexpr cp))
-                                                        (+ program-size 2)))
+                                                             (+ program-size 2)))
                                             compressed-programs)])
     valid-compressed-programs))
 
@@ -321,9 +417,11 @@
   (map rest (hash-table->alist ht)))
 
 (define (test-match-replacement)
-  (let* ([test-tree '(e f ((d (a b c)) b c) g h)]
-         [abstraction (make-abstraction '(X b c) '(X))])
-    (pretty-print (replace-matches test-tree abstraction))))
+  (let* ([test-tree '(e f ((d (a b c)) b c) g h (e f (q q)))]
+         [abstraction (make-abstraction '(X b Y) '(X Y))]
+         [abstraction2 (make-abstraction '(e f Z) '(Z))])
+    (pretty-print (replace-matches test-tree abstraction))
+    (pretty-print (replace-matches test-tree abstraction2))))
 
 (define (test-compression sexpr)
   (for-each display (list "original expr:\n" sexpr "\n"
@@ -334,13 +432,28 @@
        (unique-programs
         (iterated-compressions
          (make-program '() sexpr)))))
+'b
+(define (test-redundant-variable)
+  (let* ([tabs (make-abstraction '(+ A B C D) '(A B C D))]
+         [test-trees '((+ a b b a) (+ q d d q) (+ f m m f))])
+;         [test-trees '((+ 2 3 3 2) (+ 4 5 5 4) (+ 6 1 1 6))])
+    (map (lambda (x) (replace-matches x tabs)) test-trees)
+    (pretty-print tabs)
+    (pretty-print (remove-redundant-variables tabs))))
 
-(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
+(test-redundant-variable)
+;(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
 ;; (test-compression '(f (a b (x y (u k l)))
 ;;                       (a b c)
 ;;                       (a b (z d (u k l)))
 ;;                       (a b c)))
 ;(test-self-matching)
 ;(test-match-replacement)
+
 ;(self-matches (enumerate-tree '(a (d e) (d e))))
 ;(exit)
+
+
+
+
+
