@@ -5,7 +5,7 @@
 ;;   the program at all calls to the function, collapse them, remove-redundant-variables will do this, but before adding to compression make sure we can handle same variables
 ;; - at [1], when variables are part of a pattern, make the pattern more general
 ;;   such that the variables are given in the function call
-;; - for self-matches, don't both compare subtree A to B and B to A, only one direction, use unieque-commutative-pairs function
+
 
 (import (except (rnrs) string-hash string-ci-hash)
         (only (ikarus) set-car! set-cdr!)
@@ -326,7 +326,10 @@
 ;; return abstractions for all subtrees that enumerated tree et has in
 ;; common with itself, ignore identity matches
 (define (self-matches et)
-  (common-subtrees et et #t))
+  (define (fau st1 st2)
+    (list st1 st2 (filtered-anti-unify st1 st2 #t)))
+  (let ([sts (all-subtrees et)])
+    (unique-commutative-pairs sts fau)))
 
 
 ;; takes a sexpr (s), a sexpr with variables (sv) and a proc name, e.g.
@@ -351,6 +354,8 @@
                     (if (any false? assignments)
                         #f
                         (apply append assignments)))])))))
+
+;;unify2 uses a hashtable to record instances of variables returns, makes sure all instances are same for a variable and returns the same thing as unify
 
 ;; doesn't deal with partial matches, could use more error checking
 (define (replace-matches s abstraction)
@@ -446,7 +451,7 @@
                     "enumerated test-tree: " enum-test-tree "\n\n"))
     (map pretty-print-match
          (filter (lambda (m) (third m))
-                 (self-matches enum-test-tree)))))
+                 (self-matches2 enum-test-tree)))))
 
 (define (test-match-replacement)
   (let* ([test-tree '(e f ((d (a b c)) b c) g h (e f (q q)))]
@@ -474,9 +479,9 @@
     (pretty-print tabs)
     (pretty-print (remove-redundant-variables tabs))))
 
-(test-redundant-variables)
+(test-self-matching)
 
-;; (test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
+;;(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
 ;; (test-compression '(f (a b (x y (u k l)))
 ;;                       (a b c)
 ;;                       (a b (z d (u k l)))
@@ -518,6 +523,7 @@
 
 
 
-
+;;mini to do
+;;-write unify2
 
 
