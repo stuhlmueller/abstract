@@ -451,7 +451,7 @@
                     "enumerated test-tree: " enum-test-tree "\n\n"))
     (map pretty-print-match
          (filter (lambda (m) (third m))
-                 (self-matches2 enum-test-tree)))))
+                 (self-matches enum-test-tree)))))
 
 (define (test-match-replacement)
   (let* ([test-tree '(e f ((d (a b c)) b c) g h (e f (q q)))]
