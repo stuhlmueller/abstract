@@ -40,12 +40,20 @@
       (and (first lst)
            (all (rest lst)))))
 
+
                                         ;compute the number of nodes in a tree
+
+(define (max-take lst n)
+  (if (<= (length lst) n)
+      lst
+      (take lst n)))
+
+;compute the size of a program
 (define (size tree)
   (if (list? tree)
       (cond [(tagged-list? tree 'begin) (size (rest tree))] ;; ignore 'begin symbol
             [(tagged-list? tree 'define) (size (cddr tree))] ;; ignore 'define symbol + args
-            [else (+ 1 (apply + (map size tree)))])
+            [else (apply + (map size tree))])
       1))
 
 
@@ -106,7 +114,7 @@
 
 
 
-;; data structures
+;; data structures & associated functions
 
 (define etree->id first)
 (define etree->tree cdr) ;; non-recursive
@@ -136,6 +144,7 @@
   `(begin
      ,@(map abstraction->define (program->abstractions program))
      ,(program->body program)))
+
 
 ;;;a history of how each pattern was used, the keys to the hashtable are names of abstractions and the entries are hashtables where the keys are variable names for the abstractions and the values are lists of past instances  
 (define abstraction-instances (make-hash-table eqv?))
@@ -214,6 +223,23 @@
 ;make this nicer
 (define (applied? abstraction)
   (hash-table-ref abstraction-instances (abstraction->name abstraction) (lambda () #f)))
+
+;; FIXME: assumes that there is only one program for each size
+(define (unique-programs programs)
+  (define ht (make-hash-table eqv?))
+  (map (lambda (p) (hash-table-set! ht (size (program->sexpr p)) p)) programs)
+  (map rest (hash-table->alist ht)))
+
+(define (sort-by-size programs)
+  (let* ([program-sizes (map (compose size program->sexpr) programs)]
+         [programs-with-size (zip programs program-sizes)]
+         [size< (lambda (a b) (< (second a) (second b)))])
+    (map first (list-sort size< programs-with-size))))
+
+(define (shortest-n n programs)
+  (max-take (sort-by-size programs) n))
+
+
 
 ;; transforms a tree like
 ;; (a (b) (c (d)) (e (f)))
@@ -362,7 +388,7 @@
          [compressed-programs (map (curry compress-program program) valid-abstractions)]
          [program-size (size (program->sexpr program))]
          [valid-compressed-programs (filter (lambda (cp) (<= (size (program->sexpr cp))
-                                                             (+ program-size 2)))
+                                                             (+ program-size 1)))
                                             compressed-programs)])
     valid-compressed-programs))
 
@@ -379,11 +405,25 @@
     (make-program (pair abstraction compressed-abstractions)
                   compressed-body)))
 
-;; iteratively compress program, computing all entries of full (semi)lattice
-(define (iterated-compressions program)
-  (let ([compressed-programs (compressions program)])
+;; iteratively compress program, filter programs using cfilter before recursing
+(define (iterated-compressions cfilter program)
+  (let ([compressed-programs (cfilter (compressions program))])
     (append compressed-programs
-            (apply append (map iterated-compressions compressed-programs)))))
+            (apply append (map (curry iterated-compressions cfilter) compressed-programs)))))
+
+;; compute all entries of full (semi)lattice
+(define all-iterated-compressions
+  (curry iterated-compressions (lambda (x) x)))
+
+;; before exploring, boil down set of programs to eliminate duplicates
+;; NOTE: uses unique-programs which currently compares by length!
+(define unique-iterated-compressions
+  (curry iterated-compressions unique-programs))
+
+;; NOTE: uses unique-programs which currently compares by length!
+(define (beam-search-compressions n program)
+  (iterated-compressions (lambda (progs) (shortest-n n (unique-programs progs)))
+                         program))
 
 
 ;; testing
@@ -409,12 +449,6 @@
     (map pretty-print-match
          (filter (lambda (m) (third m))
                  (self-matches enum-test-tree)))))
-
-;; assumes that there is only one program for each size
-(define (unique-programs programs)
-  (define ht (make-hash-table eqv?))
-  (map (lambda (p) (hash-table-set! ht (size (program->sexpr p)) p)) programs)
-  (map rest (hash-table->alist ht)))
 
 (define (test-match-replacement)
   (let* ([test-tree '(e f ((d (a b c)) b c) g h (e f (q q)))]
@@ -447,6 +481,46 @@
 ;;                       (a b c)
 ;;                       (a b (z d (u k l)))
 ;;                       (a b c)))
+
+       (sort-by-size
+        (unique-programs
+         (beam-search-compressions 2 (make-program '() sexpr))))))
+
+;; (test-compression '(a (a (foo) b) (a (bar) b)))
+;; (test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
+(test-compression '(k (h (g (f (a b (x y (u k l)))
+                               (a b c)
+                               (a b (z d (u k l)))
+                               (a b c))
+                            (f (a b (x y (u k l)))
+                               (a b c)
+                               (a b (z d (u k l)))
+                               (a b c)))
+                         (g (f (a b (x y (u k l)))
+                               (a b c)
+                               (a b (z d (u k l)))
+                               (a b c))
+                            (f (a b (x y (u k l)))
+                               (a b c)
+                               (a b (z d (u k l)))
+                               (a b c))))
+                      (h (g (f (a b (x y (u k l)))
+                               (a b c)
+                               (a b (z d (u k l)))
+                               (a b c))
+                            (f (a b (x y (u k l)))
+                               (a b c)
+                               (a b (z d (u k l)))
+                               (a b c)))
+                         (g (f (a b (x y (u k l)))
+                               (a b c)
+                               (a b (z d (u k l)))
+                               (a b c))
+                            (f (a b (x y (u k l)))
+                               (a b c)
+                               (a b (z d (u k l)))
+                               (a b c))))))
+
 ;(test-self-matching)
 ;(test-match-replacement)
 
