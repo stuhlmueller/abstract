@@ -2,13 +2,14 @@
 
 ;; TODO:
 ;; - at [1], when variables are part of a pattern, make the pattern more general
-;;   such that the variables are given in the function call; perhaps free variables are not a problem?
+;;   such that the variables are given in the function call
 
 
 (import (except (rnrs) string-hash string-ci-hash)
         (only (ikarus) set-car! set-cdr!)
         (_srfi :1)
         (_srfi :69)
+;        (srfi :13)
         (church readable-scheme))
 
 (define (all-equal? lst)
@@ -48,6 +49,11 @@
       (map (curry sexp-replace old new) sexp)
       (if (equal? sexp old) new sexp)))
 
+(define (sexp-search pred? func sexp)
+  (if (list? sexp)
+      (map (curry sexp-search pred? func) sexp)
+      (if (pred? sexp) (func sexp) sexp)))
+
 ;; eventually use this in for self-matching of subtrees
 (define (unique-commutative-pairs lst func)
   (define (recursion lst1 lst2)
@@ -61,7 +67,6 @@
 
 ;; look up value for key in alist; if not found,
 ;; set (default-thunk) as value and return it
-
 (define (get/make-alist-entry alist alist-set! key default-thunk)
   (let ([binding (assq key alist)])
     (if binding
@@ -114,7 +119,15 @@
                                    (hash-table-set! mt args val)
                                    val))))))
 
-
+;;language specific functions ;use reg-exps
+;;temp fix b/c problems access to srfi 13
+(define (var? expr)
+  (if (symbol? expr)
+      (let* ([var-pattern "v"]
+             [string-expr (symbol->string expr)])
+;        (string-prefix? var-pattern string-expr))))
+        (equal? (substring string-expr 0 1) "v"))
+      #f))
 ;; data structures & associated functions
 
 (define etree->id first)
@@ -399,13 +412,35 @@
   (let ([abstractions (map third subtree-matches)])
     (filter (lambda (x) x) abstractions)))
 
-(define (get-valid-abstractions2 subtree-matches)
+(define (get/make-valid-abstractions subtree-matches)
   (let* ([abstractions (map third subtree-matches)]
          [non-false (filter (lambda (x) x) abstractions)]
          [no-free-vars (map capture-vars non-false)])
     no-free-vars))
 
-;(define (capture-vars abstraction))
+(define (capture-vars abstraction)
+  (let* ([free-vars (get-free-vars abstraction)]
+         [new-vars (append free-vars (abstraction->vars abstraction))]
+         [old-pattern (abstraction->pattern abstraction)]
+         [old-name (abstraction->name abstraction)])
+    (if (null? free-vars)
+        abstraction
+        (let ([no-free-abstraction (make-named-abstraction old-name old-pattern new-vars)])
+          (hash-table-update! abstraction-instances old-name (lambda (original) (make-abstraction-history new-vars)))
+          no-free-abstraction)
+          )))
+
+(define (get-free-vars abstraction)
+  (let* ([pattern (abstraction->pattern abstraction)]
+         [non-free (abstraction->vars abstraction)]
+         [free '()]
+         [free-var? (lambda (x) (and (var? x) (not (member x non-free))))]
+         [add-to-free! (lambda (x) (set! free (pair x free)))])
+    (sexp-search free-var? add-to-free! pattern)
+    free))
+
+        
+
   
 
 ;; joins definitions and program body into one big list
@@ -417,7 +452,7 @@
 (define (compressions program)
   (let* ([condensed-program (condense-program program)]
          [abstractions (self-matches (enumerate-tree condensed-program))]
-         [valid-abstractions (get-valid-abstractions abstractions)] ;; [1]
+         [valid-abstractions (get/make-valid-abstractions abstractions)] ;; [1]
          [compressed-programs (map (curry compress-program program) valid-abstractions)]
          [program-size (size (program->sexpr program))]
          [valid-compressed-programs (filter (lambda (cp) (<= (size (program->sexpr cp))
@@ -504,7 +539,7 @@
   (map pretty-print-program
        (sort-by-size
         (unique-programs
-         (beam-search-compressions 2 (make-program '() sexpr))))))
+         (beam-search-compressions 100 (make-program '() sexpr))))))
 
 (define (test-redundant-variables)
   (let* ([tabs (make-abstraction '(+ A B C D) '(A B C D))]
@@ -522,9 +557,14 @@
          [et (enumerate-tree expr)])
     (pretty-print (self-matches et))))
 
-;(test-repeated-variable-pattern)
+(define (test-capture-vars)
+  (pretty-print (capture-vars (make-abstraction '(v1 v2 (f a v3)) '(v3)))))
 
-;;(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
+;;(test-capture-vars)
+
+;(test-repeated-variable-pattern)
+(test-compression '(h (m (h (m (h (m (h (m (c))))))))))
+;(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
 ;; (test-compression '(f (a b (x y (u k l)))
 ;;                       (a b c)
 ;;                       (a b (z d (u k l)))
@@ -564,6 +604,9 @@
  ;;                               (a b (z d (u k l)))
  ;;                               (a b c))))))
 
-(test-compression '(+ (+ a b a a b b) (+ c d c c d d) (+ e b e e b b)))
+;(test-compression '((f (f (f (f x)))) (g (g (g (g x))))))
 
 
+;;
+;;write get-free-vars
+;;write var?
