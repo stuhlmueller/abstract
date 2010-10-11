@@ -1,8 +1,7 @@
 #!r6rs
 
 ;; TODO:
-;; - at [1], when variables are part of a pattern, make the pattern more general
-;;   such that the variables are given in the function call
+;; - find example of need for variable capture 
 
 
 (import (except (rnrs) string-hash string-ci-hash)
