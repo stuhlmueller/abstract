@@ -1,8 +1,6 @@
 #!r6rs
 
 ;; TODO:
-;; - when different variables of a function refer to same structure in
-;;   the program at all calls to the function, collapse them, remove-redundant-variables will do this, but before adding to compression make sure we can handle same variables
 ;; - at [1], when variables are part of a pattern, make the pattern more general
 ;;   such that the variables are given in the function call
 
@@ -13,6 +11,14 @@
         (_srfi :69)
         (church readable-scheme))
 
+(define (all-equal? lst)
+  (all (map (lambda (itm) (equal? (first lst) itm)) (rest lst))))
+
+(define (all-assoc alist key)
+  (filter (lambda (entry) (equal? (first entry) key)) alist))
+
+(define (more-than-one lst)
+  (> (length lst) 1))
 
 (define (curry fun . const-args)
   (lambda args
@@ -339,7 +345,7 @@
 ;; first pass: (P (foo a b c))
 ;; second (operand) pass: (P (P a))
 ;; returns #f if abstraction cannot be applied, otherwise variable assignments
-;; ! assumes that each variable occurs only once in sv
+;; ! assumes that each variable occurs only once in sv [2]
 (define unify
   (mem (lambda (s sv vars)
          (begin
@@ -353,11 +359,17 @@
                   (let ([assignments (map (lambda (si sj) (unify si sj vars)) s sv)])
                     (if (any false? assignments)
                         #f
-                        (apply append assignments)))])))))
+                        (check/remove-repeated (apply append assignments))))])))))
 
-;;unify2 uses a hashtable to record instances of variables returns, makes sure all instances are same for a variable and returns the same thing as unify
+;;returns false if any repeated variable in pattern doesn't have the same value or any of the assignments are false, returns a set of unique variable assignments
+(define (check/remove-repeated unified-vars)
+  (let* ([repeated-vars (filter more-than-one (map (curry all-assoc unified-vars) (map first unified-vars)))])
+    (if (and (all (map all-equal? repeated-vars)) (not (any false? unified-vars)))
+        (delete-duplicates unified-vars)
+        #f)))
+        
 
-;; doesn't deal with partial matches, could use more error checking
+;; doesn't deal with partial matches, could use more error checking; 
 (define (replace-matches s abstraction)
   (let ([unified-vars (unify s
                              (abstraction->pattern abstraction)
@@ -442,6 +454,12 @@
     (pretty-print sexpr)
     (for-each display (list "size: " (size sexpr) "\n\n"))))
 
+(define (test-unify)
+  (let* ([sexpr '(a b c d)]
+         [pattern '(A b c A)] 
+         [variables '(A B)]) 
+    (pretty-print (unify sexpr pattern variables))))
+;;((A . a)) correct output?!
 (define (test-self-matching)
   (let* ([test-tree '(((u) b y (a (b (c d e)) f g) x (a c))
                       ((i) b z (a (b (c d e)) f g) x (a d)) f)]
@@ -479,7 +497,7 @@
     (pretty-print tabs)
     (pretty-print (remove-redundant-variables tabs))))
 
-(test-self-matching)
+(test-unify)
 
 ;;(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
 ;; (test-compression '(f (a b (x y (u k l)))
@@ -487,43 +505,43 @@
 ;;                       (a b (z d (u k l)))
 ;;                       (a b c)))
 ;; (test-compression '(a (a (foo bar) b) (a (bar foo) b) (a (bzar fzoo) b)))
-;; (test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
-;; (test-compression '(k (h (g (f (a b (x y (u k l)))
-;;                                (a b c)
-;;                                (a b (z d (u k l)))
-;;                                (a b c))
-;;                             (f (a b (x y (u k l)))
-;;                                (a b c)
-;;                                (a b (z d (u k l)))
-;;                                (a b c)))
-;;                          (g (f (a b (x y (u k l)))
-;;                                (a b c)
-;;                                (a b (z d (u k l)))
-;;                                (a b c))
-;;                             (f (a b (x y (u k l)))
-;;                                (a b c)
-;;                                (a b (z d (u k l)))
-;;                                (a b c))))
-;;                       (h (g (f (a b (x y (u k l)))
-;;                                (a b c)
-;;                                (a b (z d (u k l)))
-;;                                (a b c))
-;;                             (f (a b (x y (u k l)))
-;;                                (a b c)
-;;                                (a b (z d (u k l)))
-;;                                (a b c)))
-;;                          (g (f (a b (x y (u k l)))
-;;                                (a b c)
-;;                                (a b (z d (u k l)))
-;;                                (a b c))
-;;                             (f (a b (x y (u k l)))
-;;                                (a b c)
-;;                                (a b (z d (u k l)))
-;;                                (a b c))))))
+;;(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
+ (test-compression '(k (h (g (f (a b (x y (u k l)))
+                               (a b c)
+                               (a b (z d (u k l)))
+                               (a b c))
+                            (f (a b (x y (u k l)))
+                               (a b c)
+                               (a b (z d (u k l)))
+                               (a b c)))
+                         (g (f (a b (x y (u k l)))
+                               (a b c)
+                               (a b (z d (u k l)))
+                               (a b c))
+                            (f (a b (x y (u k l)))
+                               (a b c)
+                               (a b (z d (u k l)))
+                               (a b c))))
+                      (h (g (f (a b (x y (u k l)))
+                               (a b c)
+                               (a b (z d (u k l)))
+                               (a b c))
+                            (f (a b (x y (u k l)))
+                               (a b c)
+                               (a b (z d (u k l)))
+                               (a b c)))
+                         (g (f (a b (x y (u k l)))
+                               (a b c)
+                               (a b (z d (u k l)))
+                               (a b c))
+                            (f (a b (x y (u k l)))
+                               (a b c)
+                               (a b (z d (u k l)))
+                               (a b c))))))
 
 
 
 ;;mini to do
-;;-write unify2
+;;test unify2
 
 
