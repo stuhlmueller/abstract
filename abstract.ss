@@ -2,7 +2,7 @@
 
 ;; TODO:
 ;; - at [1], when variables are part of a pattern, make the pattern more general
-;;   such that the variables are given in the function call
+;;   such that the variables are given in the function call; perhaps free variables are not a problem?
 
 
 (import (except (rnrs) string-hash string-ci-hash)
@@ -225,19 +225,19 @@
     (make-named-abstraction old-name new-pattern new-variables)))
 
 (define (remove-redundant-variables abstraction)
-  (if (not (applied? abstraction))
-      abstraction
-      (let* ([vars (abstraction->vars abstraction)]
-             [var-pairs (unique-commutative-pairs vars list)])
-        (define (same-abstraction-recursion var-pairs)
-          (if (null? var-pairs)
-              abstraction
-              (let* ([var-pair (first var-pairs)]
-                     [pair-reduced (check/reduce-redundant-pair abstraction (first var-pair) (second var-pair))])
-                (if pair-reduced
-                    (remove-redundant-variables pair-reduced)
-                    (same-abstraction-recursion (rest var-pairs))))))
-        (same-abstraction-recursion var-pairs))))
+  (let ([vars (abstraction->vars abstraction)])
+    (if (or (not (applied? abstraction)) (null? vars))
+        abstraction
+        (let* ([var-pairs (unique-commutative-pairs vars list)])
+          (define (same-abstraction-recursion var-pairs)
+            (if (null? var-pairs)
+                abstraction
+                (let* ([var-pair (first var-pairs)]
+                       [pair-reduced (check/reduce-redundant-pair abstraction (first var-pair) (second var-pair))])
+                  (if pair-reduced
+                      (remove-redundant-variables pair-reduced)
+                      (same-abstraction-recursion (rest var-pairs))))))
+          (same-abstraction-recursion var-pairs)))))
 
 (define (applied? abstraction)
   (hash-table-ref abstraction-instances
@@ -305,6 +305,7 @@
 
 ;; replcae a few uninteresting abstractions with #f
 ;; (single variable or singleton list)
+;; returns an abstraction or #f
 (define (filtered-anti-unify et1 et2 ignore-id-matches)
   (let* ([variables-pattern (anti-unify et1 et2 ignore-id-matches)]
          [variables (first variables-pattern)]
@@ -333,7 +334,15 @@
 ;; common with itself, ignore identity matches
 (define (self-matches et)
   (define (fau st1 st2)
-    (list st1 st2 (filtered-anti-unify st1 st2 #t)))
+    (let* ([abstraction (filtered-anti-unify st1 st2 #t)]
+           [exp1 (unenumerate-tree st1)]
+           [exp2 (unenumerate-tree st2)])
+      (if abstraction
+          (begin 
+            (replace-matches exp1 abstraction)
+            (replace-matches exp2 abstraction)
+            (list st1 st2 (remove-redundant-variables abstraction)))
+          (list st1 st2 #f))))
   (let ([sts (all-subtrees et)])
     (unique-commutative-pairs sts fau)))
 
@@ -389,6 +398,15 @@
 (define (get-valid-abstractions subtree-matches)
   (let ([abstractions (map third subtree-matches)])
     (filter (lambda (x) x) abstractions)))
+
+(define (get-valid-abstractions2 subtree-matches)
+  (let* ([abstractions (map third subtree-matches)]
+         [non-false (filter (lambda (x) x) abstractions)]
+         [no-free-vars (map capture-vars non-false)])
+    no-free-vars))
+
+;(define (capture-vars abstraction))
+  
 
 ;; joins definitions and program body into one big list
 (define (condense-program program)
@@ -497,7 +515,14 @@
     (pretty-print tabs)
     (pretty-print (remove-redundant-variables tabs))))
 
-(test-unify)
+
+;the expression should have a pattern with repeated variables
+(define (test-repeated-variable-pattern)
+  (let* ([expr '(+ (+ a b a) (+ c d c))]
+         [et (enumerate-tree expr)])
+    (pretty-print (self-matches et))))
+
+;(test-repeated-variable-pattern)
 
 ;;(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
 ;; (test-compression '(f (a b (x y (u k l)))
@@ -506,42 +531,39 @@
 ;;                       (a b c)))
 ;; (test-compression '(a (a (foo bar) b) (a (bar foo) b) (a (bzar fzoo) b)))
 ;;(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
- (test-compression '(k (h (g (f (a b (x y (u k l)))
-                               (a b c)
-                               (a b (z d (u k l)))
-                               (a b c))
-                            (f (a b (x y (u k l)))
-                               (a b c)
-                               (a b (z d (u k l)))
-                               (a b c)))
-                         (g (f (a b (x y (u k l)))
-                               (a b c)
-                               (a b (z d (u k l)))
-                               (a b c))
-                            (f (a b (x y (u k l)))
-                               (a b c)
-                               (a b (z d (u k l)))
-                               (a b c))))
-                      (h (g (f (a b (x y (u k l)))
-                               (a b c)
-                               (a b (z d (u k l)))
-                               (a b c))
-                            (f (a b (x y (u k l)))
-                               (a b c)
-                               (a b (z d (u k l)))
-                               (a b c)))
-                         (g (f (a b (x y (u k l)))
-                               (a b c)
-                               (a b (z d (u k l)))
-                               (a b c))
-                            (f (a b (x y (u k l)))
-                               (a b c)
-                               (a b (z d (u k l)))
-                               (a b c))))))
+ ;; (test-compression '(k (h (g (f (a b (x y (u k l)))
+ ;;                               (a b c)
+ ;;                               (a b (z d (u k l)))
+ ;;                               (a b c))
+ ;;                            (f (a b (x y (u k l)))
+ ;;                               (a b c)
+ ;;                               (a b (z d (u k l)))
+ ;;                               (a b c)))
+ ;;                         (g (f (a b (x y (u k l)))
+ ;;                               (a b c)
+ ;;                               (a b (z d (u k l)))
+ ;;                               (a b c))
+ ;;                            (f (a b (x y (u k l)))
+ ;;                               (a b c)
+ ;;                               (a b (z d (u k l)))
+ ;;                               (a b c))))
+ ;;                      (h (g (f (a b (x y (u k l)))
+ ;;                               (a b c)
+ ;;                               (a b (z d (u k l)))
+ ;;                               (a b c))
+ ;;                            (f (a b (x y (u k l)))
+ ;;                               (a b c)
+ ;;                               (a b (z d (u k l)))
+ ;;                               (a b c)))
+ ;;                         (g (f (a b (x y (u k l)))
+ ;;                               (a b c)
+ ;;                               (a b (z d (u k l)))
+ ;;                               (a b c))
+ ;;                            (f (a b (x y (u k l)))
+ ;;                               (a b c)
+ ;;                               (a b (z d (u k l)))
+ ;;                               (a b c))))))
 
-
-
-;;mini to do
-;;test unify2
+(test-compression '(+ (+ a b a a b b) (+ c d c c d d) (+ e b e e b b)))
 
 
