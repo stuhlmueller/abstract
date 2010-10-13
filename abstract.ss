@@ -1,14 +1,14 @@
 #!r6rs
 
 ;; TODO:
-;; - at [1], when variables are part of a pattern, make the pattern more general
-;;   such that the variables are given in the function call; perhaps free variables are not a problem?
+;; - find example of need for variable capture 
 
 
 (import (except (rnrs) string-hash string-ci-hash)
         (only (ikarus) set-car! set-cdr!)
         (_srfi :1)
         (_srfi :69)
+                                        ;        (srfi :13)
         (church readable-scheme))
 
 (define (all-equal? lst)
@@ -48,6 +48,11 @@
       (map (curry sexp-replace old new) sexp)
       (if (equal? sexp old) new sexp)))
 
+(define (sexp-search pred? func sexp)
+  (if (list? sexp)
+      (map (curry sexp-search pred? func) sexp)
+      (if (pred? sexp) (func sexp) sexp)))
+
 ;; eventually use this in for self-matching of subtrees
 (define (unique-commutative-pairs lst func)
   (define (recursion lst1 lst2)
@@ -61,7 +66,6 @@
 
 ;; look up value for key in alist; if not found,
 ;; set (default-thunk) as value and return it
-
 (define (get/make-alist-entry alist alist-set! key default-thunk)
   (let ([binding (assq key alist)])
     (if binding
@@ -113,6 +117,16 @@
                       (lambda () (let ([val (apply f args)])
                                    (hash-table-set! mt args val)
                                    val))))))
+
+;;language specific functions ;use reg-exps
+;;temp fix b/c problems access to srfi 13
+(define (var? expr)
+  (if (symbol? expr)
+      (let* ([var-pattern "v"]
+             [string-expr (symbol->string expr)])
+        ;; (string-prefix? var-pattern string-expr))))
+        (equal? (substring string-expr 0 1) "v"))
+      #f))
 
 
 ;; data structures & associated functions
@@ -376,7 +390,7 @@
     (if (and (all (map all-equal? repeated-vars)) (not (any false? unified-vars)))
         (delete-duplicates unified-vars)
         #f)))
-        
+
 
 ;; doesn't deal with partial matches, could use more error checking; 
 (define (replace-matches s abstraction)
@@ -399,14 +413,33 @@
   (let ([abstractions (map third subtree-matches)])
     (filter (lambda (x) x) abstractions)))
 
-;; (define (get-valid-abstractions2 subtree-matches)
-;;   (let* ([abstractions (map third subtree-matches)]
-;;          [non-false (filter (lambda (x) x) abstractions)]
-;;          [no-free-vars (map capture-vars non-false)])
-;;     no-free-vars))
+(define (get/make-valid-abstractions subtree-matches)
+  (let* ([abstractions (map third subtree-matches)]
+         [non-false (filter (lambda (x) x) abstractions)]
+         [no-free-vars (map capture-vars non-false)])
+    no-free-vars))
 
-;(define (capture-vars abstraction))
-  
+(define (capture-vars abstraction)
+  (let* ([free-vars (get-free-vars abstraction)]
+         [new-vars (append free-vars (abstraction->vars abstraction))]
+         [old-pattern (abstraction->pattern abstraction)]
+         [old-name (abstraction->name abstraction)])
+    (if (null? free-vars)
+        abstraction
+        (let ([no-free-abstraction (make-named-abstraction old-name old-pattern new-vars)])
+          (hash-table-update! abstraction-instances old-name (lambda (original) (make-abstraction-history new-vars)))
+          no-free-abstraction)
+        )))
+
+(define (get-free-vars abstraction)
+  (let* ([pattern (abstraction->pattern abstraction)]
+         [non-free (abstraction->vars abstraction)]
+         [free '()]
+         [free-var? (lambda (x) (and (var? x) (not (member x non-free))))]
+         [add-to-free! (lambda (x) (set! free (pair x free)))])
+    (sexp-search free-var? add-to-free! pattern)
+    free))
+
 
 ;; joins definitions and program body into one big list
 (define (condense-program program)
@@ -417,11 +450,11 @@
 (define (compressions program)
   (let* ([condensed-program (condense-program program)]
          [abstractions (self-matches (enumerate-tree condensed-program))]
-         [valid-abstractions (get-valid-abstractions abstractions)] ;; [1]
+         [valid-abstractions (get/make-valid-abstractions abstractions)] ;; [1]
          [compressed-programs (map (curry compress-program program) valid-abstractions)]
          [program-size (size (program->sexpr program))]
          [valid-compressed-programs (filter (lambda (cp) (<= (size (program->sexpr cp))
-                                                             (+ program-size 1)))
+                                                        (+ program-size 1)))
                                             compressed-programs)])
     valid-compressed-programs))
 
@@ -477,6 +510,7 @@
          [pattern '(A b c A)] 
          [variables '(A B)]) 
     (pretty-print (unify sexpr pattern variables))))
+
 ;;((A . a)) correct output?!
 (define (test-self-matching)
   (let* ([test-tree '(((u) b y (a (b (c d e)) f g) x (a c))
@@ -504,66 +538,69 @@
   (map pretty-print-program
        (sort-by-size
         (unique-programs
-         (beam-search-compressions 2 (make-program '() sexpr))))))
+         (beam-search-compressions 100 (make-program '() sexpr))))))
 
 (define (test-redundant-variables)
   (let* ([tabs (make-abstraction '(+ A B C D) '(A B C D))]
          [test-trees '((+ a b b a) (+ q d d q) (+ f m m f))])
-;         [test-trees '((+ 2 3 3 2) (+ 4 5 5 4) (+ 6 1 1 6))])
+    ;;         [test-trees '((+ 2 3 3 2) (+ 4 5 5 4) (+ 6 1 1 6))])
     (map (lambda (x) (replace-matches x tabs)) test-trees)
     (pretty-print test-trees)    
     (pretty-print tabs)
     (pretty-print (remove-redundant-variables tabs))))
 
 
-;the expression should have a pattern with repeated variables
+;; the expression should have a pattern with repeated variables
 (define (test-repeated-variable-pattern)
   (let* ([expr '(+ (+ a b a) (+ c d c))]
          [et (enumerate-tree expr)])
     (pretty-print (self-matches et))))
 
-;(test-repeated-variable-pattern)
+(define (test-capture-vars)
+  (pretty-print (capture-vars (make-abstraction '(v1 v2 (f a v3)) '(v3)))))
 
-;;(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
-(test-compression '(f (a b (x y (u k l)))
-                      (a b c)
-                      (a b (z d (u k l)))
-                      (a b c)))
+;; (test-capture-vars)
+
+;; (test-repeated-variable-pattern)
+(test-compression '(h (m (h (m (h (m (h (m (c))))))))))
+;; (test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
+;; (test-compression '(f (a b (x y (u k l)))
+;;                       (a b c)
+;;                       (a b (z d (u k l)))
+;;                       (a b c)))
 ;; (test-compression '(a (a (foo bar) b) (a (bar foo) b) (a (bzar fzoo) b)))
 ;;(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
- ;; (test-compression '(k (h (g (f (a b (x y (u k l)))
- ;;                               (a b c)
- ;;                               (a b (z d (u k l)))
- ;;                               (a b c))
- ;;                            (f (a b (x y (u k l)))
- ;;                               (a b c)
- ;;                               (a b (z d (u k l)))
- ;;                               (a b c)))
- ;;                         (g (f (a b (x y (u k l)))
- ;;                               (a b c)
- ;;                               (a b (z d (u k l)))
- ;;                               (a b c))
- ;;                            (f (a b (x y (u k l)))
- ;;                               (a b c)
- ;;                               (a b (z d (u k l)))
- ;;                               (a b c))))
- ;;                      (h (g (f (a b (x y (u k l)))
- ;;                               (a b c)
- ;;                               (a b (z d (u k l)))
- ;;                               (a b c))
- ;;                            (f (a b (x y (u k l)))
- ;;                               (a b c)
- ;;                               (a b (z d (u k l)))
- ;;                               (a b c)))
- ;;                         (g (f (a b (x y (u k l)))
- ;;                               (a b c)
- ;;                               (a b (z d (u k l)))
- ;;                               (a b c))
- ;;                            (f (a b (x y (u k l)))
- ;;                               (a b c)
- ;;                               (a b (z d (u k l)))
- ;;                               (a b c))))))
+;; (test-compression '(k (h (g (f (a b (x y (u k l)))
+;;                               (a b c)
+;;                               (a b (z d (u k l)))
+;;                               (a b c))
+;;                            (f (a b (x y (u k l)))
+;;                               (a b c)
+;;                               (a b (z d (u k l)))
+;;                               (a b c)))
+;;                         (g (f (a b (x y (u k l)))
+;;                               (a b c)
+;;                               (a b (z d (u k l)))
+;;                               (a b c))
+;;                            (f (a b (x y (u k l)))
+;;                               (a b c)
+;;                               (a b (z d (u k l)))
+;;                               (a b c))))
+;;                      (h (g (f (a b (x y (u k l)))
+;;                               (a b c)
+;;                               (a b (z d (u k l)))
+;;                               (a b c))
+;;                            (f (a b (x y (u k l)))
+;;                               (a b c)
+;;                               (a b (z d (u k l)))
+;;                               (a b c)))
+;;                         (g (f (a b (x y (u k l)))
+;;                               (a b c)
+;;                               (a b (z d (u k l)))
+;;                               (a b c))
+;;                            (f (a b (x y (u k l)))
+;;                               (a b c)
+;;                               (a b (z d (u k l)))
+;;                               (a b c))))))
 
-;; (test-compression '(+ (+ a b a a b b) (+ c d c c d d) (+ e b e e b b)))
-
-
+;; (test-compression '((f (f (f (f x)))) (g (g (g (g x))))))
