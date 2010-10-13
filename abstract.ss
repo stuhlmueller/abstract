@@ -399,11 +399,11 @@
   (let ([abstractions (map third subtree-matches)])
     (filter (lambda (x) x) abstractions)))
 
-(define (get-valid-abstractions2 subtree-matches)
-  (let* ([abstractions (map third subtree-matches)]
-         [non-false (filter (lambda (x) x) abstractions)]
-         [no-free-vars (map capture-vars non-false)])
-    no-free-vars))
+;; (define (get-valid-abstractions2 subtree-matches)
+;;   (let* ([abstractions (map third subtree-matches)]
+;;          [non-false (filter (lambda (x) x) abstractions)]
+;;          [no-free-vars (map capture-vars non-false)])
+;;     no-free-vars))
 
 ;(define (capture-vars abstraction))
   
@@ -525,10 +525,10 @@
 ;(test-repeated-variable-pattern)
 
 ;;(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
-;; (test-compression '(f (a b (x y (u k l)))
-;;                       (a b c)
-;;                       (a b (z d (u k l)))
-;;                       (a b c)))
+(test-compression '(f (a b (x y (u k l)))
+                      (a b c)
+                      (a b (z d (u k l)))
+                      (a b c)))
 ;; (test-compression '(a (a (foo bar) b) (a (bar foo) b) (a (bzar fzoo) b)))
 ;;(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
  ;; (test-compression '(k (h (g (f (a b (x y (u k l)))
@@ -564,6 +564,6 @@
  ;;                               (a b (z d (u k l)))
  ;;                               (a b c))))))
 
-(test-compression '(+ (+ a b a a b b) (+ c d c c d d) (+ e b e e b b)))
+;; (test-compression '(+ (+ a b a a b b) (+ c d c c d d) (+ e b e e b b)))
 
 
