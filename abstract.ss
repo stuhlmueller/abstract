@@ -1,6 +1,8 @@
 #!r6rs
 
 ;; TODO:
+;; - add stochastic recursion as a possible compression
+;; - write a function for doing single step compression/decompression that also returns forward/backward probabilities
 ;; - find example of need for variable capture 
 
 
@@ -8,7 +10,6 @@
         (only (ikarus) set-car! set-cdr!)
         (_srfi :1)
         (_srfi :69)
-                                        ;        (srfi :13)
         (church readable-scheme))
 
 (define (all-equal? lst)
@@ -289,12 +290,17 @@
 
 
 ;; returns #f if trees cannot be unified,
-;; otherwise tree with * in places where they differ
+;; otherwise tree with variable in places where they differ
 ;; returns for (the enumerated version of) trees
 ;; (z (a (x (i (j)) (h (m)))) (c) (d (f) (i)))
 ;; (z (a (x (k (l)) (h (m)))) (c) (d (h (f)) (i)))
 ;; this:
 ;; (z (a (x (* (*)) (h (m)))) (c) (d * (i)))
+;; also checks to see if the trees fit the recursion pattern
+;; (f (f (f c)))
+;; (f (f c))
+;; returns:
+;; (if (flip) var2 (var1 (rec
 (define anti-unify
   (mem (lambda (et1 et2 ignore-id-matches)
          (begin 
@@ -334,6 +340,25 @@
           (if (false? pattern)
               #f
               (make-abstraction pattern variables))))))
+
+;;a function to see if two trees have the same recursive pattern e.g. (f (
+(define (recursive? tree)
+  (define (function-call? tree)
+    (and (list? tree) (eq? 2 (length tree))))
+  (define function-name first)
+  (define arg second)
+  
+  (if (not (function-call? tree))
+      #f
+      (if (function-call? (arg tree))
+          (let* ((function1 (function-name tree))
+                 (function2 (function-name (arg tree))))
+            (and (equal? function1 function2) (recursive? (arg tree))))
+          #t)))
+
+  
+
+      
 
 ;; anti-unify all combinations of subtrees
 (define (common-subtrees et1 et2 ignore-id-matches)
@@ -561,8 +586,12 @@
 
 ;; (test-capture-vars)
 
+
+
+
+(test-compression '((f (f (f (f x)))) (f (f (f (f x)))) (f (f (f (f x)))) (f (f (f (f x))))))
 ;; (test-repeated-variable-pattern)
-(test-compression '(h (m (h (m (h (m (h (m (c))))))))))
+;;(test-compression '(h (m (h (m (h (m (h (m (c))))))))))
 ;; (test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
 ;; (test-compression '(f (a b (x y (u k l)))
 ;;                       (a b c)
@@ -604,3 +633,10 @@
 ;;                               (a b c))))))
 
 ;; (test-compression '((f (f (f (f x)))) (g (g (g (g x))))))
+
+
+;;TASK TO DO
+;; - write a case in filtered-anti-unify that checks if two trees are a repeated recursive calls to the same function that call themselves except and both have the argument in the last call
+;; - add special case to replace-matches to do the same check as for finding the recursion pattern (recursive? expr) and takes the same argument
+;; - write a function that takes in an expr of the form (a (a c)) and returns (define (rec a) (if (flip) (a c) (a (rec a))))
+;; - add stochastic recursion as a possible compression
