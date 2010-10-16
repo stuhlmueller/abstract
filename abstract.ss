@@ -327,21 +327,31 @@
 ;; (single variable or singleton list)
 ;; returns an abstraction or #f
 (define (filtered-anti-unify et1 et2 ignore-id-matches)
-  (let* ([variables-pattern (anti-unify et1 et2 ignore-id-matches)]
-         [variables (first variables-pattern)]
-         [pattern (second variables-pattern)])
-    (begin
-      (define (plain-var-list? pattern)
-        (all (map (lambda (i) (member i variables)) pattern)))
-      (if (or (member pattern variables)
-              (singleton? pattern)
-              (and (list? pattern) (plain-var-list? pattern)))
-          #f
-          (if (false? pattern)
-              #f
-              (make-abstraction pattern variables))))))
+  (let* (recursion (recursive-pattern? (unenumerate-tree et1) (unenumerate-tree et2)))
+    (if recursion
+        (make-abstraction (make-recursive-pattern (recursion->function-name recursion)) (recursion->variables recursion))
+        (let* ([variables-pattern (anti-unify et1 et2 ignore-id-matches)]
+               [variables (first variables-pattern)]
+               [pattern (second variables-pattern)])
+          (begin
+            (define (plain-var-list? pattern)
+              (all (map (lambda (i) (member i variables)) pattern)))
+            (if (or (member pattern variables)
+                    (singleton? pattern)
+                    (and (list? pattern) (plain-var-list? pattern)))
+                #f
+                (if (false? pattern)
+                    #f
+                    (make-abstraction pattern variables))))))))
+;;a function to see if two trees have the same recursive pattern
+(define (recursive-pattern? t1 t2)
+  (let ((base-case1 (recursive? t1))
+        (base-case2 (recursive? t2))
+        (func1 (function-name t1))
+        (func2 (function-name t2)))
+  (and base-case1 base-case2 (equal? func1 func2) (equal? base-case1 base-case2))))
 
-;;a function to see if two trees have the same recursive pattern e.g. (f (
+                                                             ;;checks if a tree is a recursive function call and returns base case if it is and #f if not
 (define (recursive? tree)
   (define (function-call? tree)
     (and (list? tree) (eq? 2 (length tree))))
@@ -354,7 +364,7 @@
           (let* ((function1 (function-name tree))
                  (function2 (function-name (arg tree))))
             (and (equal? function1 function2) (recursive? (arg tree))))
-          #t)))
+          (arg tree))))
 
   
 
@@ -636,7 +646,9 @@
 
 
 ;;TASK TO DO
-;; - write a case in filtered-anti-unify that checks if two trees are a repeated recursive calls to the same function that call themselves except and both have the argument in the last call
+;; - write recursion->variables
+;; - write recursion->base-case
+;; - write recursion->function-name
 ;; - add special case to replace-matches to do the same check as for finding the recursion pattern (recursive? expr) and takes the same argument
 ;; - write a function that takes in an expr of the form (a (a c)) and returns (define (rec a) (if (flip) (a c) (a (rec a))))
 ;; - add stochastic recursion as a possible compression
