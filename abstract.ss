@@ -1,7 +1,6 @@
 #!r6rs
 
 ;; TODO:
-;; - add stochastic recursion as a possible compression
 ;; - write a function for doing single step compression/decompression non-deterministically that also returns forward/backward probabilities
 ;; - find example of need for variable capture 
 
@@ -140,8 +139,19 @@
   (make-named-abstraction (sym 'F) pattern variables))
 (define (make-named-abstraction name pattern variables)
   (list 'abstraction name variables pattern))
-(define (make-recursion-abstraction)
-  (list 'abstraction 'R '(f bc) '(if (flip) (f bc) (f (R)))))
+(define (make-recursion-abstraction details)
+  (let* ((function (recursion-details->function details))
+         (base-case (recursion-details->base-case details))
+         (recursion-name (sym 'R)))
+    (list 'recursion-abstraction  recursion-name '() `(if (flip) (,function ,base-case) (,function (,recursion-name))) details)))
+
+(define recursion-abstraction->details fifth)
+(define (recursion-abstraction? abstraction)
+  (equal? (first abstraction) 'recursion-abstraction)) 
+
+(define recursion-details->function first)
+(define recursion-details->base-case second)
+
 (define abstraction->name second)
 (define abstraction->vars third)
 (define abstraction->pattern fourth)
@@ -329,9 +339,9 @@
 ;; (single variable or singleton list)
 ;; returns an abstraction or #f
 (define (filtered-anti-unify et1 et2 ignore-id-matches)
-  (let* ((recursive-pattern (recursive-pattern? (unenumerate-tree et1) (unenumerate-tree et2))))
-    (if recursive-pattern
-        (make-recursion-abstraction)
+  (let* ((recursion-details (recursive-pattern? (unenumerate-tree et1) (unenumerate-tree et2))))
+    (if recursion-details
+        (make-recursion-abstraction recursion-details)
         (let* ([variables-pattern (anti-unify et1 et2 ignore-id-matches)]
                [variables (first variables-pattern)]
                [pattern (second variables-pattern)])
@@ -396,7 +406,7 @@
     (let* ([abstraction (filtered-anti-unify st1 st2 #t)]
            [exp1 (unenumerate-tree st1)]
            [exp2 (unenumerate-tree st2)])
-      (if abstraction
+      (if abstraction 
           (begin 
             (replace-matches exp1 abstraction)
             (replace-matches exp2 abstraction)
@@ -440,8 +450,8 @@
 ;; doesn't deal with partial matches, could use more error checking; 
 (define (replace-matches s abstraction)
   (let* ((recursion-details (recursive? s)))
-    (if recursion-details
-        (replace-recursion s abstraction recursion-details) 
+    (if (recursion-match? abstraction recursion-details)
+        (replace-recursion abstraction) 
         (let ([unified-vars (unify s
                                    (abstraction->pattern abstraction)
                                    (abstraction->vars abstraction))])
@@ -455,14 +465,16 @@
                       (map (lambda (var) (replace-matches (rest (assq var unified-vars)) abstraction))
                            (abstraction->vars abstraction)))))))))
 
+(define (recursion-match? abstraction instance-details)
+  (if (recursion-abstraction? abstraction)
+      (let* ((abstraction-details (recursion-abstraction->details abstraction)))
+        (equal? instance-details abstraction-details))
+      #f))
+        
 ;;replaces expressions that match the recursion pattern with the recursive pattern
-(define (replace-recursion expr abstraction recursion-details)
-  (define recursion-details->function first)
-  (define recursion-details->base-case second)
-  (let* ((function (recursion-details->function recursion-details))
-         (base-case (recursion-details->base-case recursion-details))
-         (recursion (abstraction->name abstraction)))
-    (list recursion function base-case)))
+(define (replace-recursion abstraction)
+  (abstraction-instances->add-instance! abstraction '())
+  (list (abstraction->name abstraction)))
 
 ;; throw out any matches that are #f
 (define (get-valid-abstractions subtree-matches)
@@ -620,9 +632,10 @@
 
 
 ;;(recursive? '(f (f x)))
-(test-compression '((f (f (f (f x)))) (f (f (f (f x)))) (f (f (f (f x)))) (g (g (g (g x))))))
+;(test-compression '((f (f (f (f x)))) (f (f (f (f x)))) (f (f (f (f x)))) (g (f (f (f x))))))
 ;; (test-repeated-variable-pattern)
-;;(test-compression '(h (m (h (m (h (m (h (m (c))))))))))
+;; (test-compression '((f (f (f (f (f (f (f (f (f (f (f (f x))))))))))))))
+(test-compression '((h (m (h (m (h (m (h (m (c))))))))) (h (m (h (m (h (m (c))))))) (h (m (h (m (c))))) (h (m (c)))))
 ;; (test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
 ;; (test-compression '(f (a b (x y (u k l)))
 ;;                       (a b c)
@@ -666,8 +679,4 @@
 ;;(test-compression '((f (f (f (f x)))) (g (g (g (g x))))))
 
 
-;;TASK TO DO
-;; - change replace-recursion  to check if recursive? returns the same function and base-case as the abstraction
-;; - redesign recursion pattern to have specific info on the function and base-case and change the recursion abstraction name to be unique; also add function name and base-case to recursion-abstraction so it can be accessed during replacement/an alternate is to call recursive? on the pattern of the recursion abstraction
 
-;; - add stochastic recursion as a possible compression
