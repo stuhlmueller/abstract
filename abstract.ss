@@ -4,7 +4,6 @@
 ;; - write a function for doing single step compression/decompression non-deterministically that also returns forward/backward probabilities
 ;; - find example of need for variable capture 
 
-
 (import (except (rnrs) string-hash string-ci-hash)
         (only (ikarus) set-car! set-cdr!)
         (_srfi :1)
@@ -514,6 +513,9 @@
   `(,@(map abstraction->pattern (program->abstractions program))
     ,(program->body program)))
 
+         
+            
+
 ;; compute a list of compressed programs
 (define (compressions program)
   (let* ([condensed-program (condense-program program)]
@@ -559,6 +561,43 @@
   (iterated-compressions (lambda (progs) (shortest-n n (unique-programs progs)))
                          program))
 
+
+;; returns a new proposal along with forward/backward probability, used in mcmc
+(define (proposal program)
+  (let ([prob-of-inline .5])
+    (if (flip prob-of-inline)
+        (inline program prob-of-inline)
+        (inverse-inline program prob-of-inline))))
+
+
+;;inlining or decompression code; returns an expanded program and the probability of moving to that particular expansion
+(define (inline program prob-of-inline)
+  (let* ([abstractions (program->abstractions program)]
+         [inline-choice (uniform-draw abstractions)]
+         [inlined-body (inverse-replace-matches inline-choice (program->body program))]
+         [inlined-abstractions (delete inline-choice abstractions)]
+         [prob (* prob-of-inline (/ 1 (length abstractions)))])
+    (list (make-program inlined-abstractions inlined-body) prob)))
+         
+
+;;given a program body and an abstraction replace all function applications of teh abstraction in the body with the instantiated pattern
+(define (inverse-replace-matches  abstraction sexpr)
+  (cond [(instance? sexpr abstraction)
+         (instantiate-pattern sexpr abstraction)]
+        [(list? sexpr) (map (curry inverse-replace-matches abstraction) sexpr)]
+        [else sexpr]))
+
+;;the sexpr is of the form (F arg1...argN) where F is the name of the abstraction and N is the number of variables in the abstraction pattern; return the pattern with all the variables replaced by the arguments to F
+(define (instantiate-pattern sexpr abstraction)
+  (let* ([var-values (rest sexpr)]
+         [var-names (abstraction->vars abstraction)])
+    (fold replace-var (abstraction->pattern abstraction) (zip var-names var-values))))
+
+;;replace the named variable in the pattern with a value
+(define (replace-var name-value pattern)
+  (define name first)
+  (define value second)
+  (sexp-replace (name name-value) (value name-value) pattern))
 
 ;; testing
 
@@ -630,12 +669,18 @@
 ;; (test-capture-vars)
 
 
+(define (test-instantiate-pattern)
+  (let ([abstraction (make-named-abstraction 'F '(+ a a (+ b c)) '(a c))]
+        [sexpr '(F 3 4)])
+;;    (pretty-print (replace-var (abstraction->pattern abstraction) '(a 3)))))
+    (pretty-print (instantiate-pattern sexpr abstraction))))
 
+(test-instantiate-pattern)
 ;;(recursive? '(f (f x)))
 ;(test-compression '((f (f (f (f x)))) (f (f (f (f x)))) (f (f (f (f x)))) (g (f (f (f x))))))
 ;; (test-repeated-variable-pattern)
 ;; (test-compression '((f (f (f (f (f (f (f (f (f (f (f (f x))))))))))))))
-(test-compression '((h (m (h (m (h (m (h (m (c))))))))) (h (m (h (m (h (m (c))))))) (h (m (h (m (c))))) (h (m (c)))))
+;;(test-compression '((h (m (h (m (h (m (h (m (c))))))))) (h (m (h (m (h (m (c))))))) (h (m (h (m (c))))) (h (m (c))) (f (f (f (f (f (f (f (f (f (f (f (f x))))))))))))))
 ;; (test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
 ;; (test-compression '(f (a b (x y (u k l)))
 ;;                       (a b c)
@@ -679,4 +724,9 @@
 ;;(test-compression '((f (f (f (f x)))) (g (g (g (g x))))))
 
 
+;; - test instantiate-pattern
+;; - write instance?
+;; - write inverse-inline
+;; - think about whether you need to modify the abstraction-instances when inlining
+;; - write a function for doing single step compression/decompression non-deterministically that also returns forward/backward probabilities
 
