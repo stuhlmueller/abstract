@@ -687,13 +687,13 @@
 
 (define (test-inline)
   (let* ([a1 (make-named-abstraction 'F '(+ a a (+ b c)) '(a c))]
-         [a2 (make-named-abstraction 'G '(* a (+ q q) c) '(a c))]
+         [a2 (make-named-abstraction 'G '(* a (+ q q) c a) '(a c))]
          [body '(+ (F 3 4) (* (G (F 20 30) 8) (G 9 10)))]
          [program (make-program (list a1 a2) body)])
     (pretty-print (inline program .5))))
 (test-inline)
 ;;(recursive? '(f (f x)))
-;(test-compression '((f (f (f (f x)))) (f (f (f (f x)))) (f (f (f (f x)))) (g (f (f (f x))))))
+;;(test-compression '((f (f (f (f x)))) (f (f (f (f x)))) (f (f (f (f x)))) (g (f (f (f x))))))
 ;; (test-repeated-variable-pattern)
 ;; (test-compression '((f (f (f (f (f (f (f (f (f (f (f (f x))))))))))))))
 ;;(test-compression '((h (m (h (m (h (m (h (m (c))))))))) (h (m (h (m (h (m (c))))))) (h (m (h (m (c))))) (h (m (c))) (f (f (f (f (f (f (f (f (f (f (f (f x))))))))))))))
