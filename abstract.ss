@@ -2,6 +2,7 @@
 
 ;; TODO:
 ;; - write a function for doing single step compression/decompression non-deterministically that also returns forward/backward probabilities
+;; - ignore size for definition of recursion pattern to encourage its use
 ;; - find example of need for variable capture 
 
 (import (except (rnrs) string-hash string-ci-hash)
@@ -582,10 +583,19 @@
 
 ;;given a program body and an abstraction replace all function applications of teh abstraction in the body with the instantiated pattern
 (define (inverse-replace-matches  abstraction sexpr)
-  (cond [(instance? sexpr abstraction)
+  (cond [(abstraction-instance? sexpr abstraction)
          (instantiate-pattern sexpr abstraction)]
         [(list? sexpr) (map (curry inverse-replace-matches abstraction) sexpr)]
         [else sexpr]))
+
+;;test whether an expression is an application of the abstraction e.g. (F 3 4) for the abstraction F
+(define (abstraction-instance? sexpr abstraction)
+  (if (list? sexpr)
+      (let* ([name (abstraction->name abstraction)]
+             [num-vars (length (abstraction->vars abstraction))]
+             [num-vals (length (rest sexpr))])
+        (and (equal? (first sexpr) name) (eq? num-vars num-vals)))
+      #f))
 
 ;;the sexpr is of the form (F arg1...argN) where F is the name of the abstraction and N is the number of variables in the abstraction pattern; return the pattern with all the variables replaced by the arguments to F
 (define (instantiate-pattern sexpr abstraction)
@@ -675,7 +685,13 @@
 ;;    (pretty-print (replace-var (abstraction->pattern abstraction) '(a 3)))))
     (pretty-print (instantiate-pattern sexpr abstraction))))
 
-(test-instantiate-pattern)
+(define (test-inline)
+  (let* ([a1 (make-named-abstraction 'F '(+ a a (+ b c)) '(a c))]
+         [a2 (make-named-abstraction 'G '(* a (+ q q) c) '(a c))]
+         [body '(+ (F 3 4) (* (G (F 20 30) 8) (G 9 10)))]
+         [program (make-program (list a1 a2) body)])
+    (pretty-print (inline program .5))))
+(test-inline)
 ;;(recursive? '(f (f x)))
 ;(test-compression '((f (f (f (f x)))) (f (f (f (f x)))) (f (f (f (f x)))) (g (f (f (f x))))))
 ;; (test-repeated-variable-pattern)
@@ -724,8 +740,7 @@
 ;;(test-compression '((f (f (f (f x)))) (g (g (g (g x))))))
 
 
-;; - test instantiate-pattern
-;; - write instance?
+;; - test inline
 ;; - write inverse-inline
 ;; - think about whether you need to modify the abstraction-instances when inlining
 ;; - write a function for doing single step compression/decompression non-deterministically that also returns forward/backward probabilities
