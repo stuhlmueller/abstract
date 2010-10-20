@@ -2,6 +2,7 @@
 
 ;; TODO:
 ;; - write a function for doing single step compression/decompression non-deterministically that also returns forward/backward probabilities
+;; - make distribution over abstraction choices for proposal parameterized?
 ;; - ignore size for definition of recursion pattern to encourage its use
 ;; - find example of need for variable capture 
 
@@ -10,6 +11,8 @@
         (_srfi :1)
         (_srfi :69)
         (church readable-scheme))
+
+(define (identity x) x)
 
 (define (all-equal? lst)
   (all (map (lambda (itm) (equal? (first lst) itm)) (rest lst))))
@@ -143,11 +146,26 @@
   (let* ((function (recursion-details->function details))
          (base-case (recursion-details->base-case details))
          (recursion-name (sym 'R)))
-    (list 'recursion-abstraction  recursion-name '() `(if (flip) (,function ,base-case) (,function (,recursion-name))) details)))
+    (list 'abstraction  recursion-name '() `(if (flip) (,function ,base-case) (,function (,recursion-name))))))
 
-(define recursion-abstraction->details fifth)
-(define (recursion-abstraction? abstraction)
-  (equal? (first abstraction) 'recursion-abstraction)) 
+;;takes advantage of the fixed form in make-recursion-abstraction
+(define (recursion-abstraction->details abstraction)
+  (let* ([pattern (abstraction->pattern abstraction)])
+    (third pattern)))
+         
+
+;;checks if an abstraction is a recursion by seeing if the pattern uses the name of the abstraction; can also rewrite to take advantage of fixed pattern for recursions...if speed needed
+(define recursion-abstraction?
+  (mem (lambda (abstraction)
+         (let ([name (abstraction->name abstraction)]
+               [pattern (abstraction->pattern abstraction)])
+           (define (name-used? sexp)
+             (if (list? sexp)
+                 (any true? (map name-used? sexp))
+                 (if (equal? sexp name)
+                     #t
+                     #f)))
+           (name-used? pattern)))))
 
 (define recursion-details->function first)
 (define recursion-details->base-case second)
@@ -562,8 +580,17 @@
   (iterated-compressions (lambda (progs) (shortest-n n (unique-programs progs)))
                          program))
 
+;;compress a single step, used as a mcmc proposal
+(define (inverse-inline program prob-of-inline)
+  (pretty-print "inverse-inline")
+  (let* ([possible-compressions (compressions program)])
+    (if (null? possible-compressions)
+        (list program prob-of-inline)
+        (let* ([compression-choice (uniform-draw possible-compressions)]
+               [prob (* prob-of-inline (/ 1 (length possible-compressions)))])
+          (list compression-choice prob)))))
 
-;; returns a new proposal along with forward/backward probability, used in mcmc
+;;returns a new proposal along with forward/backward probability, used in mcmc
 (define (proposal program)
   (let ([prob-of-inline .5])
     (if (flip prob-of-inline)
@@ -573,13 +600,33 @@
 
 ;;inlining or decompression code; returns an expanded program and the probability of moving to that particular expansion
 (define (inline program prob-of-inline)
-  (let* ([abstractions (program->abstractions program)]
-         [inline-choice (uniform-draw abstractions)]
-         [inlined-body (inverse-replace-matches inline-choice (program->body program))]
-         [inlined-abstractions (delete inline-choice abstractions)]
-         [prob (* prob-of-inline (/ 1 (length abstractions)))])
-    (list (make-program inlined-abstractions inlined-body) prob)))
-         
+  (pretty-print "inline")
+  (let* ([abstractions (program->abstractions program)])
+    (if (null? abstractions)
+        (list program prob-of-inline)
+        (let* ([inline-choice (uniform-draw abstractions)]
+               [remaining-abstractions (delete inline-choice abstractions)]
+               [prob (* prob-of-inline (/ 1 (length abstractions)))])
+          (list (inverse-replace-matches inline-choice (make-program remaining-abstractions (program->body program))) prob)))))
+          
+;;           (if (recursive-abstraction? inline-choice)
+;;               (inline-recursion remaining-abstractions (program->body program) inline-choice prob-of-inline)
+;;               (let* [inlined-abstractions (inline-abstractions inline-choice remaining-abstractions)]
+;;                 [inlined-body (inverse-replace-matches inline-choice (program->body program))]
+                
+;;                 [prob (* prob-of-inline (/ 1 (length abstractions)))])
+;;               (list (make-program inlined-abstractions inlined-body) prob))))))
+
+;; (define (inline-recursion abstractions body inline-choice prob-of-inline)
+;;   (
+
+(define (inline-abstractions inline-choice abstractions)
+  (define (inline-abstraction abstraction)
+    (let* ([name (abstraction->name abstraction)]
+           [vars (abstraction->vars abstraction)]
+           [pattern (abstraction->pattern abstraction)])
+      (make-named-abstraction name (inverse-replace-matches inline-choice pattern) vars)))
+  (map (curry inline-abstraction inline-choice) abstractions))
 
 ;;given a program body and an abstraction replace all function applications of teh abstraction in the body with the instantiated pattern
 (define (inverse-replace-matches  abstraction sexpr)
@@ -588,20 +635,26 @@
         [(list? sexpr) (map (curry inverse-replace-matches abstraction) sexpr)]
         [else sexpr]))
 
-;;test whether an expression is an application of the abstraction e.g. (F 3 4) for the abstraction F
+;;test whether an expression is an application of the abstraction e.g. (F 3 4) for the abstraction F, also checks if abstraction is being used in higher-order function e.g. (G 3 F)
 (define (abstraction-instance? sexpr abstraction)
-  (if (list? sexpr)
+  (if (and (list? sexpr) (not (null? sexpr)))
       (let* ([name (abstraction->name abstraction)]
              [num-vars (length (abstraction->vars abstraction))]
              [num-vals (length (rest sexpr))])
         (and (equal? (first sexpr) name) (eq? num-vars num-vals)))
-      #f))
+      (if (equal? (abstraction->name abstraction) sexpr) #t #f)))
 
-;;the sexpr is of the form (F arg1...argN) where F is the name of the abstraction and N is the number of variables in the abstraction pattern; return the pattern with all the variables replaced by the arguments to F
+
+;;the sexpr is of the form (F arg1...argN) where F is the name of the abstraction and N is the number of variables in the abstraction pattern; return the pattern with all the variables replaced by the arguments to F; the first case deals with the abstraction being used in a higher-order functions
 (define (instantiate-pattern sexpr abstraction)
-  (let* ([var-values (rest sexpr)]
-         [var-names (abstraction->vars abstraction)])
-    (fold replace-var (abstraction->pattern abstraction) (zip var-names var-values))))
+  (if (equal? sexpr (abstraction->name abstraction))
+      (make-anon abstraction)
+      (let* ([var-values (rest sexpr)]
+             [var-names (abstraction->vars abstraction)])
+        (fold replace-var (abstraction->pattern abstraction) (zip var-names var-values)))))
+
+(define (make-anon abstraction)
+  `(lambda ,(abstraction->vars abstraction) ,(abstraction->pattern abstraction)))
 
 ;;replace the named variable in the pattern with a value
 (define (replace-var name-value pattern)
@@ -686,12 +739,14 @@
     (pretty-print (instantiate-pattern sexpr abstraction))))
 
 (define (test-inline)
-  (let* ([a1 (make-named-abstraction 'F '(+ a a (+ b c)) '(a c))]
-         [a2 (make-named-abstraction 'G '(* a (+ q q) c a) '(a c))]
+  (let* ([a1 (make-named-abstraction 'F '(+ a (G 99 100) (+ b c)) '(a c))]
+         [a2 (make-named-abstraction 'G '(* (F 2 1) (+ q q) c a) '(a c))]
          [body '(+ (F 3 4) (* (G (F 20 30) 8) (G 9 10)))]
          [program (make-program (list a1 a2) body)])
     (pretty-print (inline program .5))))
-(test-inline)
+
+        
+;;(test-inline)
 ;;(recursive? '(f (f x)))
 ;;(test-compression '((f (f (f (f x)))) (f (f (f (f x)))) (f (f (f (f x)))) (g (f (f (f x))))))
 ;; (test-repeated-variable-pattern)
@@ -739,9 +794,46 @@
 
 ;;(test-compression '((f (f (f (f x)))) (g (g (g (g x))))))
 
+(define (test-proposal)
+  (let ([init (make-program '() '(+ (+ (+ a a a) (+ c c c) (+ d d d)) (f (f (f (f (f (f (f (f (f (f (f (+ a a a)))))))))))) (+ a a a)))])
+    (define (random-walk steps program)
+      (let* ([proposed (proposal program)]
+             [next-program (first proposed)])
+        (pretty-print proposed)
+        (if (= 0 steps)
+            program
+            (random-walk (- steps 1) next-program))))
+    (random-walk 10 init)))
 
-;; - test inline
-;; - write inverse-inline
+;;(test-proposal)
+;(test-inline)
+
+(define (test-recursion-abstraction?)
+  (let ([r (make-recursion-abstraction '(f 0))]
+        [a (make-named-abstraction 'G '(* (F 2 1) (+ q q) c a) '(a c))])
+    (pretty-print r)
+    (pretty-print (recursion-abstraction? r))
+    (pretty-print (recursion-abstraction? a))))
+
+;;(test-recursion-abstraction?)
+
+(define (test-higher-order-inline)
+  (let* ([a1 (make-named-abstraction 'G '(* (f 3) x) '(f x))]
+         [a2 (make-named-abstraction 'F '(+ x x x) '(x))]
+         [body '(+ (G F 5) (F 84))]
+         [program (make-program (list a1 a2) body)])
+    (pretty-print (inline program .5))))
+        
+(test-higher-order-inline)
+  
+
+
+;; - modify inverse-replace-matches to do recursion abstraction; may mean moving probabilities into this function
+
+;; - maybe add special case to rewrite; applied anonymous functions rewritten as the body of the lambda with the variables filled in
+
 ;; - think about whether you need to modify the abstraction-instances when inlining
 ;; - write a function for doing single step compression/decompression non-deterministically that also returns forward/backward probabilities
+
+;; -potential issue if you try to inline a function that calls itself and it is not in the form (f (f (f (x))))); if you start from programs without abstraction this may never occur since any recursive function should abstract to (f(f(f(x)))) form 
 
