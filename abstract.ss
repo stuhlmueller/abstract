@@ -705,7 +705,7 @@
   (map pretty-print-program
        (sort-by-size
         (unique-programs
-         (beam-search-compressions 100 (make-program '() sexpr))))))
+         (beam-search-compressions 10 (make-program '() sexpr))))))
 
 (define (test-redundant-variables)
   (let* ([tabs (make-abstraction '(+ A B C D) '(A B C D))]
@@ -803,7 +803,7 @@
     (random-walk 10 init)))
 
 (test-proposal)
-;(test-inline)
+;;(test-inline)
 
 (define (test-recursion-abstraction?)
   (let ([r (make-recursion-abstraction '(f 0))]
