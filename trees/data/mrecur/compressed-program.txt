@@ -1,0 +1,77 @@
+(uniform-draw (list (node c (node b (node d (node a (node a (node e (node a (node a) (node a (node a (node a (node b)) (node a (node a (node a (node a (node d) (node b)) (node a (node a (node a) (node b)) (node b))) (node a (node b))) (node b (node a (node a (node a) (node b)) (node a (node a (node a) (node d)) (node a (node a) (node b)))) (node a (node a) (node b))))) (node a (node a (node a (node a) (node a (node a (node a) (node a (node c (node a (node a) (node b)) (node b)) (node b))) (node a (node a) (node b)))) (node a (node a) (node a (node b)))) (node b)))) (node a (node a (node a) (node b)) (node a (node a) (node b)))) (node a (node a (node a) (node b)) (node a (node a (node a (node a (node a) (node b)) (node b)) (node b))))) (node a (node a (node a) (node a (node a) (node b))) (node a (node a) (node a (node a (node a (node a (node a (node a (node a (node a (node a (node a) (node b)) (node a (node a) (node b))) (node b)) (node b)) (node a (node a) (node a (node a (node a) (node a (node a) (node a (node a (node a (node a)) (node a (node a) (node d))) (node a (node a (node a) (node a (node a) (node a (node a) (node b)))) (node b))))) (node b)))) (node a (node a (node a (node a (node a) (node b)) (node a (node a (node a (node a (node a) (node b))) (node a (node a) (node b))))) (node b)) (node b))) (node a (node a (node a) (node b)) (node b))) (node c)) (node a (node a) (node b)))))))) (node a (node b) (node a (node a) (node a (node a (node a (node a) (node a (node a (node a) (node a (node a) (node a (node a) (node b)))) (node d))) (node b)) (node b))))) (node c (node b (node d (node a (node a (node a) (node a (node a (node a (node a (node a (node a (node a) (node a)) (node b)) (node b)) (node b)) (node a (node a) (node a (node a) (node b)))) (node b))) (node b)))) (node a (node a (node a) (node a (node a (node a (node a (node a) (node a (node a) (node b))) (node a (node a) (node b))) (node b)))) (node b)))))
+size: 430
+
+(define (multiple-recursion)
+  (define (part)
+    (node 'a
+          (if (flip .5)
+              (part)
+              (node 'a))
+          (if (flip .5)
+              (part)
+              (node 'b))))
+  (node 'c (node 'b (node 'd (part))) (part)))
+
+("compressed-program:"
+  (let ()
+    (define (R4389) (if (flip) (F15 (F10917)) (F15 (R4389))))
+    (define (F23946) (F15 (node d)))
+    (define (F22680 v142501) (F7869 (F7869 v142501)))
+    (define (F21479 v131803 v131802 v131801)
+      (F13831 v131801 (F13831 v131802 v131803)))
+    (define (F21151 v128293 v128292)
+      (node c (node b (node d v128292)) v128293))
+    (define (F19681 v114990) (node a v114990))
+    (define (F17811 v98420) (F7869 (F15 v98420)))
+    (define (F16605 v87716) (F13831 (F10917) v87716))
+    (define (F15274) (F19681 (node b)))
+    (define (F13831 v64674 v64673) (node a v64673 v64674))
+    (define (F10917) (F15 (node b)))
+    (define (F7869 v26966) (F13831 (node b) v26966))
+    (define (F15 v31) (F13831 v31 (node a)))
+    (uniform-draw
+      (list
+        (F21151
+          (F13831
+            (F15 (F7869 (F17811 (F13831 (node d) (R4389)))))
+            (node b))
+          (F21479
+            (node e
+              (F15
+                (F21479 (F15274)
+                  (F21479
+                    (F13831 (F7869 (F10917))
+                      (F7869 (node d)))
+                    (F15274)
+                    (node b
+                      (F13831 (F16605 (F23946)) (F10917))
+                      (F10917)))
+                  (F7869
+                    (F13831 (F15 (F15274))
+                      (F15
+                        (F16605
+                          (F15
+                            (F7869
+                              (node c (F10917) (node b))))))))))
+              (F16605 (F10917)))
+            (F13831 (F19681 (F22680 (F10917))) (F10917))
+            (F13831
+              (F15
+                (F16605
+                  (F21479
+                    (F21479 (F22680 (F16605 (F10917)))
+                      (F15
+                        (F17811
+                          (F15
+                            (F21479 (F19681 (node a))
+                              (F23946) (F17811 (R4389))))))
+                      (F22680
+                        (F13831
+                          (F19681 (F16605 (F19681 (F10917))))
+                          (F10917))))
+                    (F7869 (F10917)) (node c))))
+              (R4389))))
+        (F21151 (F17811 (F19681 (F7869 (F16605 (R4389)))))
+          (F17811
+            (F7869
+              (F13831 (R4389) (F22680 (F17811 (node a))))))))))

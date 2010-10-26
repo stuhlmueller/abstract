@@ -1,0 +1,22 @@
+(uniform-draw (list (node a (node c) (node a (node c) (node a (node c) (node a (node c) (node c)) (node c)) (node c)) (node c)) (node a (node c) (node a (node c) (node a (node c) (node a (node c) (node c)) (node c)) (node c)) (node c)) (node a (node c) (node a (node c) (node d (node c) (node a (node c) (node c)) (node c)) (node c)) (node c)) (node a (node b) (node a (node b) (node a (node b) (node a (node b) (node b)) (node b)) (node b)) (node b)) (node a (node c) (node a (node c) (node a (node c) (node a (node c) (node c)) (node c)) (node c)) (node c))))
+size: 122
+
+(define (parameterized-parts)
+  (define (part x)
+    (node 'a x (node 'a x (node 'a x (node 'a x x) x) x) x))
+  (part (if (flip .5)
+            (node 'b)
+            (node 'c))))
+
+("compressed-program:"
+  (let () (define (F377) (F162 c a))
+    (define (F162 v528 v522)
+      (node a (node v528)
+        (node a (node v528)
+          (node v522 (node v528)
+            (node a (node v528) (node v528)) (node v528))
+          (node v528))
+        (node v528)))
+    (uniform-draw
+      (list (F377) (F377) (F162 c d) (F162 b a) (F377))))
+  "\nsize: " 39)

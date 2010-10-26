@@ -1,0 +1,7 @@
+(define (prototype) (node 'a (node 'b (node 'c (node 'd) (node 'd)))))
+
+("compressed-program:"
+  (let () (define (F55) (node a (F8)))
+    (define (F8) (node b (node c (node d) (node d))))
+    (uniform-draw
+      (list (F55) (F55) (F55) (node a) (node d (F8))))))
