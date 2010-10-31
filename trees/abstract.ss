@@ -5,40 +5,22 @@
 ;; - inlining with higher-order functions leads to loss of irreducibility through the creation of anonymous functions? rewrite applied lambdas in the body of a program 
 ;; - make flip in recursion parameterized?
 ;; - ignore size for definition of recursion pattern to encourage its use
-;; - find example of need for variable capture 
+;; - modify abstraction-instances to have bounded size
 (library (abstract)
          (export beam-compression pretty-print-program program->sexpr size)
          (import (except (rnrs) string-hash string-ci-hash)
                  (only (ikarus) set-car! set-cdr!)
                  (_srfi :1)
                  (_srfi :69)
-                 (church readable-scheme))
+                 (church readable-scheme)
+                 (util)
+                 (sym)
+                 (mem))
 
          (define (identity x) x)
 
-         (define (all-equal? lst)
-           (all (map (lambda (itm) (equal? (first lst) itm)) (rest lst))))
-
-         (define (all-assoc alist key)
-           (filter (lambda (entry) (equal? (first entry) key)) alist))
-
          (define (more-than-one lst)
            (> (length lst) 1))
-
-         (define (curry fun . const-args)
-           (lambda args
-             (apply fun (append const-args args))))
-
-         (define (all lst)
-           (if (null? lst)
-               #t
-               (and (first lst)
-                    (all (rest lst)))))
-
-         (define (max-take lst n)
-           (if (<= (length lst) n)
-               lst
-               (take lst n)))
 
          ;; compute the size of a program
          (define (size tree)
@@ -48,17 +30,6 @@
                      [else (apply + (map size tree))])
                1))
 
-         (define (sexp-replace old new sexp)
-           (if (list? sexp)
-               (map (curry sexp-replace old new) sexp)
-               (if (equal? sexp old) new sexp)))
-
-         (define (sexp-search pred? func sexp)
-           (if (list? sexp)
-               (map (curry sexp-search pred? func) sexp)
-               (if (pred? sexp) (func sexp) sexp)))
-
-         ;; eventually use this in for self-matching of subtrees
          (define (unique-commutative-pairs lst func)
            (define (recursion lst1 lst2)
              (if (null? lst2)
@@ -67,61 +38,6 @@
                    (append (map (lambda (from2) (func from1 from2)) lst2)
                            (recursion (rest lst1) (rest lst2))))))
            (recursion lst (rest lst)))
-
-
-         ;; look up value for key in alist; if not found,
-         ;; set (default-thunk) as value and return it
-         (define (get/make-alist-entry alist alist-set! key default-thunk)
-           (let ([binding (assq key alist)])
-             (if binding
-                 (rest binding)
-                 (let* ([default-val (default-thunk)])
-                   (alist-set! key default-val)
-                   default-val))))
-
-
-         ;; unique readable symbols. this is used to enumerate lists and to
-         ;; generate readable variable names.
-
-         (define symbol-indizes '())
-
-         (define (get-symbol-index-container tag)
-           (get/make-alist-entry symbol-indizes
-                                 (lambda (k v) (set! symbol-indizes (pair (pair k v) symbol-indizes)))
-                                 tag
-                                 (lambda () (list 0))))
-
-         (define (get-symbol-index tag)
-           (first (get-symbol-index-container tag)))
-
-         (define (inc-symbol-index! tag)
-           (let ([tag-index-container (get-symbol-index-container tag)])
-             (set-car! tag-index-container (+ (first tag-index-container) 1))))
-
-         (define (sym tag)
-           (inc-symbol-index! tag)
-           (string->symbol (string-append (symbol->string tag)
-                                          (number->string (get-symbol-index tag)))))
-
-
-         ;; memoization
-
-         (define memtables '())
-
-         (define (get/make-memtable f)
-           (get/make-alist-entry memtables
-                                 (lambda (k v) (set! memtables (pair (pair k v) memtables)))
-                                 f
-                                 (lambda () (make-hash-table equal?))))
-
-         (define (mem f)
-           (lambda args
-             (let ([mt (get/make-memtable f)])
-               (hash-table-ref mt
-                               args
-                               (lambda () (let ([val (apply f args)])
-                                            (hash-table-set! mt args val)
-                                            val))))))
 
          ;;language specific functions ;use reg-exps
          ;;temp fix b/c problems access to srfi 13
@@ -135,7 +51,6 @@
 
 
          ;; data structures & associated functions
-
          (define etree->id first)
          (define etree->tree cdr) ;; non-recursive
          (define etree->children cddr)
@@ -147,7 +62,8 @@
          (define (make-recursion-abstraction details)
            (let* ((function (recursion-details->function details))
                   (base-case (recursion-details->base-case details))
-                  (recursion-name (sym 'R)))
+                  (recursion-name (sym 'R))
+                  (flip-val .9))
              (list 'abstraction  recursion-name '() `(if (flip) (,function ,base-case) (,function (,recursion-name))))))
 
          ;;takes advantage of the fixed form in make-recursion-abstraction
@@ -405,10 +321,6 @@
                           (function2 (function-name (arg tree))))
                      (and (equal? function1 function2) (recursive? (arg tree))))
                    tree)))
-
-         
-
-         
 
          ;; anti-unify all combinations of subtrees
          (define (common-subtrees et1 et2 ignore-id-matches)
@@ -703,164 +615,6 @@
              (beam-search-compressions beam-size (make-program '() sexpr))))))
          
          )
-
-
-;; (define (test-unify)
-;;   (let* ([sexpr '(a b c d)]
-;;          [pattern '(A b c A)] 
-;;          [variables '(A B)]) 
-;;     (pretty-print (unify sexpr pattern variables))))
-
-;; ;;((A . a)) correct output?!
-;; (define (test-self-matching)
-;;   (let* ([test-tree '(((u) b y (a (b (c d e)) f g) x (a c))
-;;                       ((i) b z (a (b (c d e)) f g) x (a d)) f)]
-;;          [enum-test-tree (enumerate-tree test-tree)])
-;;     (for-each display
-;;               (list "test-tree: " test-tree "\n"
-;;                     "enumerated test-tree: " enum-test-tree "\n\n"))
-;;     (map pretty-print-match
-;;          (filter (lambda (m) (third m))
-;;                  (self-matches enum-test-tree)))))
-
-;; (define (test-match-replacement)
-;;   (let* ([test-tree '(e f ((d (a b c)) b c) g h (e f (q q)))]
-;;          [abstraction (make-abstraction '(X b Y) '(X Y))]
-;;          [abstraction2 (make-abstraction '(e f Z) '(Z))])
-;;     (pretty-print (replace-matches test-tree abstraction))
-;;     (pretty-print (replace-matches test-tree abstraction2))))
-
-;; (define (test-compression sexpr)
-;;   (for-each display (list "original expr:\n" sexpr "\n"
-;;                           "size: " (size sexpr)
-;;                           "\n\n"
-;;                           "compressed exprs:\n"))
-;;   (map pretty-print-program
-;;        (sort-by-size
-;;         (unique-programs
-;;          (beam-search-compressions 10 (make-program '() sexpr))))))
-
-;; (define (test-redundant-variables)
-;;   (let* ([tabs (make-abstraction '(+ A B C D) '(A B C D))]
-;;          [test-trees '((+ a b b a) (+ q d d q) (+ f m m f))])
-;;     ;;         [test-trees '((+ 2 3 3 2) (+ 4 5 5 4) (+ 6 1 1 6))])
-;;     (map (lambda (x) (replace-matches x tabs)) test-trees)
-;;     (pretty-print test-trees)    
-;;     (pretty-print tabs)
-;;     (pretty-print (remove-redundant-variables tabs))))
-
-
-;; ;; the expression should have a pattern with repeated variables
-;; (define (test-repeated-variable-pattern)
-;;   (let* ([expr '(+ (+ a b a) (+ c d c))]
-;;          [et (enumerate-tree expr)])
-;;     (pretty-print (self-matches et))))
-
-;; (define (test-capture-vars)
-;;   (pretty-print (capture-vars (make-abstraction '(v1 v2 (f a v3)) '(v3)))))
-
-;; ;; (test-capture-vars)
-
-
-;; (define (test-instantiate-pattern)
-;;   (let ([abstraction (make-named-abstraction 'F '(+ a a (+ b c)) '(a c))]
-;;         [sexpr '(F 3 4)])
-;; ;;    (pretty-print (replace-var (abstraction->pattern abstraction) '(a 3)))))
-;;     (pretty-print (instantiate-pattern sexpr abstraction))))
-
-;; (define (test-inline)
-;;   (let* ([a1 (make-named-abstraction 'F '(+ a (G 99 100) (+ b c)) '(a c))]
-;;          [a2 (make-named-abstraction 'G '(* (F 2 1) (+ q q) c a) '(a c))]
-;;          [body '(+ (F 3 4) (* (G (F 20 30) 8) (G 9 10)))]
-;;          [program (make-program (list a1 a2) body)])
-;;     (pretty-print (inline program .5))))
-
-        
-;; ;;(test-inline)
-;; ;;(recursive? '(f (f x)))
-;; ;;(test-compression '((f (f (f (f x)))) (f (f (f (f x)))) (f (f (f (f x)))) (g (f (f (f x))))))
-;; ;; (test-repeated-variable-pattern)
-;; ;; (test-compression '((f (f (f (f (f (f (f (f (f (f (f (f x))))))))))))))
-;; ;;(test-compression '((h (m (h (m (h (m (h (m (c))))))))) (h (m (h (m (h (m (c))))))) (h (m (h (m (c))))) (h (m (c))) (f (f (f (f (f (f (f (f (f (f (f (f x))))))))))))))
-;; ;; (test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
-;; ;; (test-compression '(f (a b (x y (u k l)))
-;; ;;                       (a b c)
-;; ;;                       (a b (z d (u k l)))
-;; ;;                       (a b c)))
-;; ;; (test-compression '(a (a (foo bar) b) (a (bar foo) b) (a (bzar fzoo) b)))
-;; ;;(test-compression '(f (a x) (f (a x) (f (a x) b (a x)) (a x)) (a x)))
-;; ;; (test-compression '(k (h (g (f (a b (x y (u k l)))
-;; ;;                               (a b c)
-;; ;;                               (a b (z d (u k l)))
-;; ;;                               (a b c))
-;; ;;                            (f (a b (x y (u k l)))
-;; ;;                               (a b c)
-;; ;;                               (a b (z d (u k l)))
-;; ;;                               (a b c)))
-;; ;;                         (g (f (a b (x y (u k l)))
-;; ;;                               (a b c)
-;; ;;                               (a b (z d (u k l)))
-;; ;;                               (a b c))
-;; ;;                            (f (a b (x y (u k l)))
-;; ;;                               (a b c)
-;; ;;                               (a b (z d (u k l)))
-;; ;;                               (a b c))))
-;; ;;                      (h (g (f (a b (x y (u k l)))
-;; ;;                               (a b c)
-;; ;;                               (a b (z d (u k l)))
-;; ;;                               (a b c))
-;; ;;                            (f (a b (x y (u k l)))
-;; ;;                               (a b c)
-;; ;;                               (a b (z d (u k l)))
-;; ;;                               (a b c)))
-;; ;;                         (g (f (a b (x y (u k l)))
-;; ;;                               (a b c)
-;; ;;                               (a b (z d (u k l)))
-;; ;;                               (a b c))
-;; ;;                            (f (a b (x y (u k l)))
-;; ;;                               (a b c)
-;; ;;                               (a b (z d (u k l)))
-;; ;;                               (a b c))))))
-
-;; ;;(test-compression '((f (f (f (f x)))) (g (g (g (g x))))))
-
-;; (define (test-proposal)
-;;   (let ([init (make-program '() '(+ (+ (+ a a a) (+ c c c) (+ d d d)) (f (f (f (f (f (f (f (f (f (f (f (+ a a a)))))))))))) (+ a a a)))])
-;;     (define (random-walk steps program)
-;;       (let* ([proposed (proposal program)]
-;;              [next-program (first proposed)])
-;;         (pretty-print proposed)
-;;         (if (= 0 steps)
-;;             program
-;;             (random-walk (- steps 1) next-program))))
-;;     (random-walk 10 init)))
-
-;; (test-proposal)
-;; ;;(test-inline)
-
-;; (define (test-recursion-abstraction?)
-;;   (let ([r (make-recursion-abstraction '(f 0))]
-;;         [a (make-named-abstraction 'G '(* (F 2 1) (+ q q) c a) '(a c))])
-;;     (pretty-print r)
-;;     (pretty-print (recursion-abstraction? r))
-;;     (pretty-print (recursion-abstraction? a))))
-
-;; ;;(test-recursion-abstraction?)
-
-;; (define (test-higher-order-inline)
-;;   (let* ([a1 (make-named-abstraction 'G '(* (f 3) x) '(f x))]
-;;          [a2 (make-named-abstraction 'F '(+ x x x) '(x))]
-;;          [body '(+ (G F 5) (F 84))]
-;;          [program (make-program (list a1 a2) body)])
-;;     (pretty-print (inline program .5))))
-        
-;; ;;(test-higher-order-inline)
-  
-;; (define (test-inline-recursion)
-;;   (let ([r (make-recursion-abstraction '(f 0))])
-;;     (pretty-print (inline-recursion r))))
-
-;; ;;(test-inline-recursion)
     
 
 
@@ -868,9 +622,7 @@
 
 ;; ;; - maybe add special case to rewrite; applied anonymous functions rewritten as the body of the lambda with the variables filled in
 
-;; ;; - think about whether you need to modify the abstraction-instances when inlining
+;; - think about whether you need to modify the abstraction-instances when inlining
 
-;; ;; - write a function for doing single step compression/decompression non-deterministically that also returns forward/backward probabilities
-
-;; ;; -potential issue if you try to inline a function that calls itself and it is not in the form (f (f (f (x))))); if you start from programs without abstraction this may never occur since any recursive function should abstract to (f(f(f(x)))) form 
+;; -potential issue if you try to inline a function that calls itself and it is not in the form (f (f (f (x))))); if you start from programs without abstraction this may never occur since any recursive function should abstract to (f(f(f(x)))) form 
 

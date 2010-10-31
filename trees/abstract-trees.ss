@@ -34,16 +34,6 @@
 (define training-size 6)
 (define generalize-size 40)
 (define labels '(a b c d e))
-(define node-def '((define (node x . subtrees)
-  (if (flip (- 1 growth-noise))
-      (delete '() (pair (noisy-label x) subtrees))
-      '()))
-
-(define (noisy-label x)
-  (if (flip (- 1 label-noise))
-      x
-      (uniform-draw labels)))))
-
 
 (define (node x . subtrees)
   (if (flip (- 1 growth-noise))
@@ -56,6 +46,8 @@
       (uniform-draw labels)))
   
 (node 'a (node 'b) (node 'c (node 'd)))
+
+;;model definitions
 (define (prototype) (node 'a (node 'b (node 'c (node 'd) (node 'd)))))
 
 (define (parameterized-parts)
@@ -85,22 +77,16 @@
               (node 'b))))
   (node 'c (node 'b (node 'd (part))) (part)))
 
+;;generate data from a model
 (define (gen-data model amount)
   (delete '() (repeat amount model)))
 
-;; (define (draw-data data)
-;;   (draw-trees (pair data data)))
-;;(draw-trees (pair "./mrecur-data.png" mrecur-data))
-
-
-
+;;returns unquoted labels...they were a problem somewhere...compressed programs?
 (define (nodify-noquote tree)
   (if (null? tree)
       '()
       (append (list 'node (first tree))
               (map nodify-noquote (rest tree)))))
-
-;;(pretty-print (nodify-noquote '(a (b (c)) (d))))
 
 
 (define (nodify tree)
@@ -109,22 +95,23 @@
       (append (list 'node (list 'quote (first tree)))
               (map nodify (rest tree)))))
 
-
+;;uniform-draw over nodified trees
 (define (program-exemplar data)
   (let* ([all-examples (map nodify data)])
     (lambda () (eval (uniform-draw all-examples) (interaction-environment)))))
 
+;;uniform-draw over trees (un-nodified)
 (define (exemplar data)
   (lambda () (uniform-draw data)))
 
-
+;;uniform-draw over compressed nodified trees
 (define (program-compression data)
   (let* ([all-examples (map nodify-noquote data)]
          [prog (program->sexpr (beam-compression (list 'uniform-draw (pair 'list all-examples)) 1))])
     (pretty-print (list "compressed-program:" prog "size: " (size prog)))
     (lambda () (eval prog (interaction-environment)))))
 
-
+;;takes a model and creates data for all the "derived models" exmemplar compressed program etc.
 (define (process-model model name)
   (let* ([training-data (gen-data model training-size)]
          [training-fname (string-join (list name "-training.png") "")]
@@ -143,35 +130,13 @@
     (process-derived-model program-exemplar "prog-exemplar")
     (process-derived-model program-compression "compress-prog")
     ))
-    ;;      [exemp (exemplar data)]
-    ;;      [exemp-data (gen-data exemp)]
-    ;;      [exemp-file-name (string-join (list name "-exemplar.png") "")]
-    ;;      [prog-exemplar (program-exemplar data)]
-    ;;      [prog-exemplar-data (gen-data prog-exemplar)]
-    ;;      [prog-exemplar-file-name (string-join (list name "-prog-exemplar.png") "")]
-    ;;      [compress-prog (program-compression data)]
-    ;;      [compress-prog-data (gen-data compress-prog)]
-    ;;      [compress-prog-file-name (string-join (list name "-compress.png") "")]
-    ;;      [new-data (gen-data model)]
-    ;;      [new-file-name (string-join (list name "-new.png") "")])
-    ;; (draw-trees (pair orig-file-name data))
-    ;; (draw-trees (pair exemp-file-name exemp-data))
-    ;; (draw-trees (pair prog-exemplar-file-name prog-exemplar-data))
-    ;; (draw-trees (pair compress-prog-file-name compress-prog-data))
-    ;; (draw-trees (pair new-file-name new-data))))
 
 ;;(process-model prototype "proto")
          
 ;;(process-model parameterized-parts "param")
 
-(process-model single-recursion "srecur")
+;;(process-model single-recursion "srecur")
 
 ;;(process-model multiple-recursion "mrecur")
 
-;;(pretty-print (beam-compression '((f (f (f (f x)))) (f (f (f (f x)))) (f (f (f (f x)))) (g (f (f (f x))))) 1))
-
-;;(program-compression (gen-data prototype))
-
-
-;; -change instances of gen-data to specify training-size or generation-size
-;; -rewrite process model to have less redundancy
+(beam-compression '((g (g (g a))) (g (g (g a)))) 2)
