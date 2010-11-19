@@ -28,11 +28,14 @@
            (if (<= (length lst) n)
                lst
                (take lst n)))
-         
+         ;;if abstract.ss stops working replace sexp-replace in abstract.ss w/ a function leaf replace (sexp-replace before it was modified to the current version)
          (define (sexp-replace old new sexp)
-           (if (list? sexp)
-               (map (curry sexp-replace old new) sexp)
-               (if (equal? sexp old) new sexp)))
+           (if (equal? old sexp)
+               new
+               (if (list? sexp)
+                   (map (curry sexp-replace old new) sexp)
+                   sexp)))
+               
 
          (define (sexp-search pred? func sexp)
            (if (list? sexp)
