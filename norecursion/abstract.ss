@@ -6,8 +6,8 @@
 ;; - make a test case for getting anonymous functions when inlining
 ;; - inlining with higher-order functions leads to loss of irreducibility through the creation of anonymous functions? rewrite applied lambdas in the body of a program 
 ;; - modify abstraction-instances to have bounded size
-(library (abstract)
-         (export compressions abstraction-proposer sexpr->program proposal beam-compression make-program  pretty-print-program program->sexpr size get-abstractions make-abstraction abstraction->define define->abstraction)
+(library (pi abstract)
+         (export compressions test-abstraction-proposer abstraction-proposer sexpr->program proposal beam-compression make-program  pretty-print-program program->sexpr size get-abstractions make-abstraction abstraction->define define->abstraction)
          (import (except (rnrs) string-hash string-ci-hash)
                  (only (ikarus) set-car! set-cdr!)
                  (_srfi :1)
@@ -64,12 +64,12 @@
          (define abstraction->vars third)
          (define abstraction->pattern fourth)
 
-         ;; make a define statement out of an abstraction
+         ;; make a define statement out of an abstraction, format is (define name (lambda (vars) body))
          (define (abstraction->define abstraction)
            (let ((name (abstraction->name abstraction))
                  (variables (abstraction->vars abstraction))
                  (pattern (abstraction->pattern abstraction)))
-             (list 'define (pair name variables) pattern)))
+             (list 'define name (list 'lambda variables pattern))))
 
          (define (make-program abstractions body)
            (list 'program abstractions body))
@@ -109,10 +109,11 @@
                  '()))
            (map define->abstraction (get-defines sexpr)))
 
+         ;;define is of the form (define name (lambda (vars) body))
          (define (define->abstraction definition)
-           (let* ([name (first (second definition))]
-                  [vars (rest (second definition))]
-                  [body (third definition)])
+           (let* ([name (second definition)]
+                  [vars (second (third definition))]
+                  [body (third (third definition))])
              (make-named-abstraction name body vars)))
 
          ;;assumes program in sexpr form is (let () definitions body)
@@ -223,12 +224,12 @@
          ;; into an enumerated tree like
          ;; ($1 a ($2 b) ($3 c (4 d)) ($5 e ($6 f)))
          (define (enumerate-tree t)
-           (if (symbol? t)
+           (if (primitive? t)
                t
                (pair (sym '$) (map enumerate-tree t))))
 
          (define (unenumerate-tree t)
-           (if (symbol? t)
+           (if (primitive? t)
                t
                (map unenumerate-tree (rest t))))
 
@@ -236,8 +237,9 @@
          (define (all-subtrees t)
            (let loop ([t (list t)])
              (cond [(null? t) '()]
-                   [(number? (first t)) (loop (rest t))]
-                   [(symbol? (first t)) (loop (rest t))]
+                   [(primitive? (first t)) (loop (rest t))]
+;;                   [(number? (first t)) (loop (rest t))]
+;;                   [(symbol? (first t)) (loop (rest t))]
                    [else (pair (first t) (loop (append (first t) (rest t))))])))
 
          ;; is obj a list like '(x)?
@@ -461,30 +463,35 @@
                                   program))
 
          ;;compress a single step, used as a mcmc proposal
-         (define (inverse-inline program prob-of-inverse-inline)
+         (define (inverse-inline program prob-inverse-inline prob-inline)
            (pretty-print "inverse-inline")
            (let* ([possible-compressions (compressions program)])
              (if (null? possible-compressions)
-                 (list program prob-of-inverse-inline prob-of-inverse-inline)
+                 (list program prob-inverse-inline prob-inverse-inline)
                  (let* ([compression-choice (uniform-draw possible-compressions)]
-                        [fw-prob (* prob-of-inverse-inline (/ 1 (length possible-compressions)))]
+                        [fw-prob (+ prob-inverse-inline (- (log (length possible-compressions))))]
                         ;;backward probability is the probability of choosing the abstraction to inline
                         [abstractions (program->abstractions compression-choice)]
-                        [bw-prob (* (- 1 prob-of-inverse-inline) (/ 1 (length abstractions)))])
+                        [bw-prob (+ prob-inline (- (log (length abstractions))))])
                    (list compression-choice fw-prob bw-prob)))))
 
          ;;returns a new proposal along with forward/backward probability, used in mcmc
          (define (proposal program)
-           (let ([prob-of-inline .5])
-             (if (flip prob-of-inline)
-                 (inline program prob-of-inline)
-                 (inverse-inline program (- 1 prob-of-inline)))))
+           (let* ([prob-inline (- (log 2.0))]
+                  [prob-inverse-inline (log (- 1 (exp prob-inline)))])
+             (if (flip prob-inline)
+                 (inline program prob-inline prob-inverse-inline)
+                 (inverse-inline program prob-inverse-inline prob-inline)))) ;;better way to do this?
 
+         (define (test-abstraction-proposer sexpr)
+           (list '(if t f t) (log .2) (log .8)))
+         
          (define (abstraction-proposer sexpr)
            (define get-program first)
            (define get-fw-prob second)
            (define get-bw-prob third)
            (let* ([program (sexpr->program sexpr)]
+                  [db (pretty-print program)]
                   [new-program+fw+bw (proposal program)]
                   [new-sexpr (program->sexpr (get-program new-program+fw+bw))]
                   [fw-prob (get-fw-prob new-program+fw+bw)]
@@ -492,19 +499,19 @@
              (list new-sexpr fw-prob bw-prob)))
 
          ;;inlining or decompression code; returns an expanded program and the probability of moving to that particular expansion
-         (define (inline program prob-of-inline)
+         (define (inline program prob-inline prob-inverse-inline)
            (pretty-print "inline")
            (let* ([abstractions (program->abstractions program)])
              (if (null? abstractions)
                  ;;is this right? if you inline a program w/o abstraction you cannot get back by inverse-inlining (unless the inverse-inline has no possible abstractions) so should we use the prob-of-inline as the probability of returning to this state
-                 (list program prob-of-inline prob-of-inline) 
+                 (list program prob-inline prob-inline) 
                  (let* ([inline-choice (uniform-draw abstractions)]
                         [remaining-abstractions (delete inline-choice abstractions)]
-                        [fw-prob (* prob-of-inline (/ 1 (length abstractions)))]
+                        [fw-prob (+ prob-inline (- (log (length abstractions))))]
                         [inlined-program (inverse-replace-matches inline-choice (make-program remaining-abstractions (program->body program)))]
                         ;;backward probability is the probability of choosing the abstraction we inlined times probability of inverse inlining
                         [possible-compressions (compressions inlined-program)]
-                        [bw-prob (* (- 1 prob-of-inline) (/ 1 (length possible-compressions)))])
+                        [bw-prob (+ prob-inverse-inline (- (log (length possible-compressions))))])
                    (list inlined-program fw-prob bw-prob)))))
          
 
