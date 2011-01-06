@@ -35,7 +35,9 @@
                (if (list? sexp)
                    (map (curry sexp-replace old new) sexp)
                    sexp)))
-               
+
+         (define (primitive? expr)
+           (or (symbol? expr) (boolean? expr) (number? expr)))         
 
          (define (sexp-search pred? func sexp)
            (if (list? sexp)
