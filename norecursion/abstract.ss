@@ -245,7 +245,7 @@
          ;; is obj a list like '(x)?
          (define (singleton? obj)
            (and (pair? obj)
-                (symbol? (first obj))
+                (primitive? (first obj))
                 (null? (rest obj))))
 
 
@@ -268,8 +268,8 @@
                       (set! variables (pair (sym 'v) variables))
                       (first variables))
                     (define (build-pattern et1 et2 ignore-id-matches)
-                      (cond [(and (symbol? et1) (symbol? et2)) (if (eq? et1 et2) et1 (add-variable!))]
-                            [(or (symbol? et1) (symbol? et2)) (add-variable!)]
+                      (cond [(and (primitive? et1) (primitive? et2)) (if (eq? et1 et2) et1 (add-variable!))]
+                            [(or (primitive? et1) (primitive? et2)) (add-variable!)]
                             [(and ignore-id-matches (eqv? (etree->id et1) (etree->id et2))) #f]
                             [(not (eqv? (length et1) (length et2))) (add-variable!)]
                             [else
@@ -341,8 +341,8 @@
                     (define (variable? obj)
                       (member obj vars))
                     (cond [(variable? sv) (list (pair sv s))]
-                          [(and (symbol? s) (symbol? sv)) (if (eq? s sv) '() #f)]
-                          [(or (symbol? s) (symbol? sv)) #f]
+                          [(and (primitive? s) (primitive? sv)) (if (eq? s sv) '() #f)]
+                          [(or (primitive? s) (primitive? sv)) #f]
                           [(not (eqv? (length s) (length sv))) #f]
                           [else
                            (let ([assignments (map (lambda (si sj) (unify si sj vars)) s sv)])
