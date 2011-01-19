@@ -7,10 +7,14 @@
         (_srfi :1))
 
 ;;;abstraction-proposer tests
-(define test-expr '(let () #t))
-
+;;(define test-expr '(let () #t))
+(define test-expr '(let () (if (if #t #t #t) (if #t #t #t) (if #t #t #t))))
+(define program-form (sexpr->program test-expr))
+;;(define test-expr1 (abstraction-move test-expr))
+;;(pretty-print (list "texp" (first test-expr1)))
 ;;make sure the output of abstraction-proposer is an sexpr of the right form, use match library
-(pretty-print (abstraction-proposer test-expr))
+
+(pretty-print (compressions program-form))
 
 
 ;; ;;(pretty-print (beam-compression '((a b c) (a b c) (a b c) (a b c)) 2))

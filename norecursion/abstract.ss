@@ -7,7 +7,7 @@
 ;; - inlining with higher-order functions leads to loss of irreducibility through the creation of anonymous functions? rewrite applied lambdas in the body of a program 
 ;; - modify abstraction-instances to have bounded size
 (library (pi abstract)
-         (export compressions test-abstraction-proposer abstraction-proposer sexpr->program proposal beam-compression make-program  pretty-print-program program->sexpr size get-abstractions make-abstraction abstraction->define define->abstraction)
+         (export compressions test-abstraction-proposer abstraction-move sexpr->program proposal beam-compression make-program  pretty-print-program program->sexpr size get-abstractions make-abstraction abstraction->define define->abstraction var? func? normalize-names)
          (import (except (rnrs) string-hash string-ci-hash)
                  (only (ikarus) set-car! set-cdr!)
                  (_srfi :1)
@@ -48,6 +48,15 @@
                  ;; (string-prefix? var-pattern string-expr))))
                  (equal? (substring string-expr 0 1) "v"))
                #f))
+
+         (define (func? expr)
+           (if (symbol? expr)
+               (let* ([var-pattern "F"]
+                      [string-expr (symbol->string expr)])
+                 ;; (string-prefix? var-pattern string-expr))))
+                 (equal? (substring string-expr 0 1) "F"))
+               #f))
+
 
 
          ;; data structures & associated functions
@@ -90,6 +99,14 @@
            (let*-values ([(no-scope-sexpr) (remove-scope sexpr)]
                          [(abstractions body) (span abstraction-sexpr? no-scope-sexpr)])
              (make-program (map define->abstraction abstractions) (first body))))
+
+         (define (sexpr->signatures sexpr)
+           (let* ([program (sexpr->program sexpr)]
+                  [defs (program->abstractions program)]
+                  [names (map abstraction->name defs)]
+                  [vars (map abstraction->vars defs)])
+             (map pair names vars)))
+
 
          (define (remove-scope sexpr)
            (define (scope? x)
@@ -134,6 +151,29 @@
 
          (define (shortest-n n programs)
            (max-take (sort-by-size programs) n))
+
+         (define (normalize-names expr)
+           (define ht (make-hash-table eqv?))
+           (define (traverse action expr)
+             (if (or (primitive? expr) (null? expr))
+                 (if (or (func? expr) (var? expr))
+                     (action expr)
+                     expr)
+                 (map (curry traverse action) expr)))
+           ;;build table
+           (define (add-to-table expr)
+             (if (func? expr)
+                 (hash-table-set! ht expr (sym 'F))
+                 (hash-table-set! ht expr (sym 'v))))
+           (define (relabel expr)
+             (hash-table-ref ht expr))
+           (reset-symbol-indizes!)
+           (let* ([signatures (sexpr->signatures expr)])
+             (traverse add-to-table signatures))
+
+           ;;(pretty-print (hash-table->alist ht))
+           (traverse relabel expr))
+         
 
 
          ;; a history of how each pattern was used, the keys to the hashtable
@@ -199,7 +239,8 @@
              (make-named-abstraction old-name new-pattern new-variables)))
 
          (define (remove-redundant-variables abstraction)
-           (let ([vars (abstraction->vars abstraction)])
+           (let ([db (pretty-print "removing redundant variables")]
+                 [vars (abstraction->vars abstraction)])
              (if (or (not (applied? abstraction)) (null? vars))
                  abstraction
                  (let* ([var-pairs (unique-commutative-pairs vars list)])
@@ -318,12 +359,15 @@
                     [exp1 (unenumerate-tree st1)]
                     [exp2 (unenumerate-tree st2)])
                (if abstraction 
-                   (begin 
+                   (begin
+                     (pretty-print (list "replacing matches" (unenumerate-tree et) exp1 exp2 abstraction))
                      (replace-matches exp1 abstraction)
+                     (pretty-print "matches replaced for exp1")
                      (replace-matches exp2 abstraction)
                      (list st1 st2 (remove-redundant-variables abstraction)))
                    (list st1 st2 #f))))
            (let ([sts (all-subtrees et)])
+             (pretty-print "in self-matches")
              (unique-commutative-pairs sts fau)))
 
 
@@ -368,7 +412,9 @@
                      (map (lambda (si) (replace-matches si abstraction)) s)
                      s)
                  (begin
+                   (pretty-print (list "inside replace-matches about to add match instances" unified-vars))
                    (abstraction-instances->add-instance! abstraction unified-vars)
+                   (pretty-print "inside replace-mathces, instance added")
                    (pair (abstraction->name abstraction)
                          (map (lambda (var) (replace-matches (rest (assq var unified-vars)) abstraction))
                               (abstraction->vars abstraction)))))))
@@ -420,7 +466,9 @@
          ;; compute a list of compressed programs
          (define (compressions program)
            (let* ([condensed-program (condense-program program)]
+                  [db (pretty-print "programs condensed")]
                   [abstractions (self-matches (enumerate-tree condensed-program))]
+                  [db (pretty-print "abstractions made")]
                   [valid-abstractions (get/make-valid-abstractions abstractions)] ;; [1]
                   [compressed-programs (map (curry compress-program program) valid-abstractions)]
                   [program-size (size (program->sexpr program))]
@@ -465,7 +513,8 @@
          ;;compress a single step, used as a mcmc proposal
          (define (inverse-inline program prob-inverse-inline prob-inline)
            (pretty-print "inverse-inline")
-           (let* ([possible-compressions (compressions program)])
+           (let* ([possible-compressions (compressions program)]
+                  [db (pretty-print "compressions made")])
              (if (null? possible-compressions)
                  (list program prob-inverse-inline prob-inverse-inline)
                  (let* ([compression-choice (uniform-draw possible-compressions)]
@@ -486,7 +535,7 @@
          (define (test-abstraction-proposer sexpr)
            (list '(if t f t) (log .2) (log .8)))
          
-         (define (abstraction-proposer sexpr)
+         (define (abstraction-move sexpr)
            (define get-program first)
            (define get-fw-prob second)
            (define get-bw-prob third)
@@ -495,7 +544,8 @@
                   [new-program+fw+bw (proposal program)]
                   [new-sexpr (program->sexpr (get-program new-program+fw+bw))]
                   [fw-prob (get-fw-prob new-program+fw+bw)]
-                  [bw-prob (get-bw-prob new-program+fw+bw)])
+                  [bw-prob (get-bw-prob new-program+fw+bw)]
+                  [none (reset-symbol-indizes!)])
              (list new-sexpr fw-prob bw-prob)))
 
          ;;inlining or decompression code; returns an expanded program and the probability of moving to that particular expansion
