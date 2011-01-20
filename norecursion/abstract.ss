@@ -5,7 +5,6 @@
 
 ;; - make a test case for getting anonymous functions when inlining
 ;; - inlining with higher-order functions leads to loss of irreducibility through the creation of anonymous functions? rewrite applied lambdas in the body of a program 
-;; - modify abstraction-instances to have bounded size
 (library (pi abstract)
          (export compressions test-abstraction-proposer abstraction-move sexpr->program proposal beam-compression make-program  pretty-print-program program->sexpr size get-abstractions make-abstraction abstraction->define define->abstraction var? func? normalize-names func-symbol var-symbol)
          (import (except (rnrs) string-hash string-ci-hash)
@@ -175,8 +174,6 @@
            (reset-symbol-indizes!)
            (let* ([signatures (sexpr->signatures expr)])
              (traverse add-to-table signatures))
-
-           ;;(pretty-print (hash-table->alist ht))
            (traverse relabel expr))
          
 
@@ -185,7 +182,7 @@
          ;; are names of abstractions and the entries are hashtables where the
          ;; keys are variable names for the abstractions and the values are
          ;; lists of past instances
-         (define abstraction-instances (make-hash-table eqv?))
+         (define abstraction-instances (make-hash-table (make-hash-table eqv?)))
          (define (abstraction-instances->get-instances abstraction)
            (hash-table-ref abstraction-instances (abstraction->name abstraction)))
          (define (abstraction-instances->add-instance! abstraction unified-vars)
@@ -197,11 +194,8 @@
                     aname
                     (lambda ()
                       (let ([new-history (make-abstraction-history avars)])
-                            ;;[db (pretty-print (list "new history created, abstraction-instances before adding" (hash-table->alist abstraction-instances))) ])
                         (hash-table-set! abstraction-instances aname new-history)
-                        new-history)))]
-                  ;;[db (pretty-print (list "in add-instance adding to abstraction history:" aname avars (hash-table->alist abstraction-history)))]
-                       )
+                        new-history)))])
              (abstraction-history->add! abstraction-history unified-vars)))
 
          ;; entries into the abstraction-instances table, basically a list of
@@ -247,8 +241,7 @@
              (make-named-abstraction old-name new-pattern new-variables)))
 
          (define (remove-redundant-variables abstraction)
-           (let (;;[db (pretty-print "removing redundant variables")]
-                 [vars (abstraction->vars abstraction)])
+           (let ([vars (abstraction->vars abstraction)])
              (if (or (not (applied? abstraction)) (null? vars))
                  abstraction
                  (let* ([var-pairs (unique-commutative-pairs vars list)])
@@ -367,19 +360,13 @@
                     [exp1 (unenumerate-tree st1)]
                     [exp2 (unenumerate-tree st2)])
                (if abstraction 
-                   (let* (;;[db (pretty-print (list "replacing matches" (unenumerate-tree et) exp1 exp2 abstraction))]
-                          [none (replace-matches exp1 abstraction)]  ;;only used to track instances where an abstraction is used
-                          ;;[db (pretty-print "matches replaced for exp1")]
+                   (let* ([none (replace-matches exp1 abstraction)]  ;;only used to track instances where an abstraction is used
                           [none (replace-matches exp2 abstraction)] ;;only used to track instances where an abstraction is used
                           [reduced-abstractions (list st1 st2 (remove-redundant-variables abstraction))]
-                          ;;[db (pretty-print (list "abstraction instances after removal" (hash-table->alist abstraction-instances)))]
-                          [none (set! abstraction-instances (make-hash-table eqv?))])
-                          ;;[db (pretty-print (list "abstraction instances reset" (hash-table->alist abstraction-instances)))])
+                          [none (set! abstraction-instances (make-hash-table eqv?))])  ;;prevents abstract-instances from growing too big
                      reduced-abstractions)
-                     ;;(set! abstraction-instances (make-hash-table eqv?)))  ;;;to avoid naming conflicts
                    (list st1 st2 #f))))
            (let ([sts (all-subtrees et)])
-             (pretty-print "in self-matches")
              (unique-commutative-pairs sts fau)))
 
 
@@ -424,9 +411,7 @@
                      (map (lambda (si) (replace-matches si abstraction)) s)
                      s)
                  (begin
-                   ;;(pretty-print (list "inside replace-matches about to add match instances" unified-vars))
                    (abstraction-instances->add-instance! abstraction unified-vars)
-                   ;;(pretty-print "inside replace-mathces, instance added")
                    (pair (abstraction->name abstraction)
                          (map (lambda (var) (replace-matches (rest (assq var unified-vars)) abstraction))
                               (abstraction->vars abstraction)))))))
@@ -494,10 +479,9 @@
          ;; compute a list of compressed programs
          (define (compressions program)
            (let* ([none (raise-func/var-indices! program)] ;;in case program already has function symbols and variable symbols higher than current indices
+                  [abstraction-instances (make-hash-table eqv?)]
                   [condensed-program (condense-program program)]
-                  ;;[db (pretty-print "programs condensed")]
                   [abstractions (self-matches (enumerate-tree condensed-program))]
-                  ;;[db (pretty-print (list "abstractions made" abstractions))]
                   [valid-abstractions (get/make-valid-abstractions abstractions)] ;; [1]
                   [compressed-programs (map (curry compress-program program) valid-abstractions)]
                   [program-size (size (program->sexpr program))]
@@ -541,11 +525,8 @@
 
          ;;compress a single step, used as a mcmc proposal
          (define (inverse-inline program prob-inverse-inline prob-inline)
-           (pretty-print "inverse-inline")
            (let* ([none (set! abstraction-instances (make-hash-table eqv?))]
-                  ;;[db (pretty-print (list "abstraction-instances should be clean" (hash-table->alist abstraction-instances)))] 
                   [possible-compressions (compressions program)])
-                  ;;[db (pretty-print "compressions made")])
              (if (null? possible-compressions)
                  (list program prob-inverse-inline prob-inverse-inline)
                  (let* ([compression-choice (uniform-draw possible-compressions)]
@@ -571,17 +552,14 @@
            (define get-fw-prob second)
            (define get-bw-prob third)
            (let* ([program (sexpr->program sexpr)]
-                  ;;[db (pretty-print program)]
                   [new-program+fw+bw (proposal program)]
                   [new-sexpr (program->sexpr (get-program new-program+fw+bw))]
                   [fw-prob (get-fw-prob new-program+fw+bw)]
                   [bw-prob (get-bw-prob new-program+fw+bw)])
-;;                  [none (reset-symbol-indizes!)])
              (list new-sexpr fw-prob bw-prob)))
 
          ;;inlining or decompression code; returns an expanded program and the probability of moving to that particular expansion
          (define (inline program prob-inline prob-inverse-inline)
-           (pretty-print "inline")
            (let* ([abstractions (program->abstractions program)])
              (if (null? abstractions)
                  ;;is this right? if you inline a program w/o abstraction you cannot get back by inverse-inlining (unless the inverse-inline has no possible abstractions) so should we use the prob-of-inline as the probability of returning to this state
@@ -659,10 +637,8 @@
          
          )
     
-;; - write get-body
-;; - write sexpr->program so proposal can be used in bher
 
-;; - think about whether you need to modify the abstraction-instances when inlining
+
 
 ;; -potential issue if you try to inline a function that calls itself and it is not in the form (f (f (f (x))))); if you start from programs without abstraction this may never occur since any recursive function should abstract to (f(f(f(x)))) form 
 
