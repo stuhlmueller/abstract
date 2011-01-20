@@ -8,7 +8,8 @@
 
 ;;;abstraction-proposer tests
 ;;(define test-expr '(let () #t))
-(define test-expr '(let () (if (if #t #t #t) (if #t #t #t) (if #t #t #t))))
+;;(define test-expr '(let () (if (if #t #t #t) (if #t #t #t) (if #t #t #t))))
+(define test-expr '(let () (define F1 (lambda () #t)) (or (and (F1) (F1) (F1)) (and (F1) (F1) (F1)) (and (F1) (F1) (F1)))))
 (define program-form (sexpr->program test-expr))
 ;;(define test-expr1 (abstraction-move test-expr))
 ;;(pretty-print (list "texp" (first test-expr1)))

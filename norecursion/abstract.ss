@@ -7,17 +7,22 @@
 ;; - inlining with higher-order functions leads to loss of irreducibility through the creation of anonymous functions? rewrite applied lambdas in the body of a program 
 ;; - modify abstraction-instances to have bounded size
 (library (pi abstract)
-         (export compressions test-abstraction-proposer abstraction-move sexpr->program proposal beam-compression make-program  pretty-print-program program->sexpr size get-abstractions make-abstraction abstraction->define define->abstraction var? func? normalize-names)
+         (export compressions test-abstraction-proposer abstraction-move sexpr->program proposal beam-compression make-program  pretty-print-program program->sexpr size get-abstractions make-abstraction abstraction->define define->abstraction var? func? normalize-names func-symbol var-symbol)
          (import (except (rnrs) string-hash string-ci-hash)
                  (only (ikarus) set-car! set-cdr!)
                  (_srfi :1)
                  (_srfi :69)
+                 (only (srfi :13) string-drop)
                  (church readable-scheme)
                  (util)
                  (sym)
                  (mem))
 
          (define (identity x) x)
+
+         ;;var-symbol and func-symbol are functions that return symbols so that they can be used in bher
+         (define (var-symbol) 'v)
+         (define (func-symbol) 'F)
 
          (define (more-than-one lst)
            (> (length lst) 1))
@@ -43,18 +48,18 @@
          ;;temp fix b/c problems access to srfi 13
          (define (var? expr)
            (if (symbol? expr)
-               (let* ([var-pattern "v"]
+               (let* ([var-string (symbol->string (var-symbol))]
                       [string-expr (symbol->string expr)])
                  ;; (string-prefix? var-pattern string-expr))))
-                 (equal? (substring string-expr 0 1) "v"))
+                 (equal? (substring string-expr 0 1) var-string))
                #f))
 
          (define (func? expr)
            (if (symbol? expr)
-               (let* ([var-pattern "F"]
+               (let* ([func-string (symbol->string (func-symbol))]
                       [string-expr (symbol->string expr)])
                  ;; (string-prefix? var-pattern string-expr))))
-                 (equal? (substring string-expr 0 1) "F"))
+                 (equal? (substring string-expr 0 1) func-string))
                #f))
 
 
@@ -65,7 +70,7 @@
          (define etree->children cddr)
 
          (define (make-abstraction pattern variables)
-           (make-named-abstraction (sym 'F) pattern variables))
+           (make-named-abstraction (sym (func-symbol)) pattern variables))
          (define (make-named-abstraction name pattern variables)
            (list 'abstraction name variables pattern))
 
@@ -163,8 +168,8 @@
            ;;build table
            (define (add-to-table expr)
              (if (func? expr)
-                 (hash-table-set! ht expr (sym 'F))
-                 (hash-table-set! ht expr (sym 'v))))
+                 (hash-table-set! ht expr (sym (func-symbol)))
+                 (hash-table-set! ht expr (sym (var-symbol)))))
            (define (relabel expr)
              (hash-table-ref ht expr))
            (reset-symbol-indizes!)
@@ -192,8 +197,11 @@
                     aname
                     (lambda ()
                       (let ([new-history (make-abstraction-history avars)])
+                            ;;[db (pretty-print (list "new history created, abstraction-instances before adding" (hash-table->alist abstraction-instances))) ])
                         (hash-table-set! abstraction-instances aname new-history)
-                        new-history)))])
+                        new-history)))]
+                  ;;[db (pretty-print (list "in add-instance adding to abstraction history:" aname avars (hash-table->alist abstraction-history)))]
+                       )
              (abstraction-history->add! abstraction-history unified-vars)))
 
          ;; entries into the abstraction-instances table, basically a list of
@@ -239,7 +247,7 @@
              (make-named-abstraction old-name new-pattern new-variables)))
 
          (define (remove-redundant-variables abstraction)
-           (let ([db (pretty-print "removing redundant variables")]
+           (let (;;[db (pretty-print "removing redundant variables")]
                  [vars (abstraction->vars abstraction)])
              (if (or (not (applied? abstraction)) (null? vars))
                  abstraction
@@ -306,7 +314,7 @@
                   (begin 
                     (define variables '())
                     (define (add-variable!)
-                      (set! variables (pair (sym 'v) variables))
+                      (set! variables (pair (sym (var-symbol)) variables))
                       (first variables))
                     (define (build-pattern et1 et2 ignore-id-matches)
                       (cond [(and (primitive? et1) (primitive? et2)) (if (eq? et1 et2) et1 (add-variable!))]
@@ -359,12 +367,16 @@
                     [exp1 (unenumerate-tree st1)]
                     [exp2 (unenumerate-tree st2)])
                (if abstraction 
-                   (begin
-                     (pretty-print (list "replacing matches" (unenumerate-tree et) exp1 exp2 abstraction))
-                     (replace-matches exp1 abstraction)
-                     (pretty-print "matches replaced for exp1")
-                     (replace-matches exp2 abstraction)
-                     (list st1 st2 (remove-redundant-variables abstraction)))
+                   (let* (;;[db (pretty-print (list "replacing matches" (unenumerate-tree et) exp1 exp2 abstraction))]
+                          [none (replace-matches exp1 abstraction)]  ;;only used to track instances where an abstraction is used
+                          ;;[db (pretty-print "matches replaced for exp1")]
+                          [none (replace-matches exp2 abstraction)] ;;only used to track instances where an abstraction is used
+                          [reduced-abstractions (list st1 st2 (remove-redundant-variables abstraction))]
+                          ;;[db (pretty-print (list "abstraction instances after removal" (hash-table->alist abstraction-instances)))]
+                          [none (set! abstraction-instances (make-hash-table eqv?))])
+                          ;;[db (pretty-print (list "abstraction instances reset" (hash-table->alist abstraction-instances)))])
+                     reduced-abstractions)
+                     ;;(set! abstraction-instances (make-hash-table eqv?)))  ;;;to avoid naming conflicts
                    (list st1 st2 #f))))
            (let ([sts (all-subtrees et)])
              (pretty-print "in self-matches")
@@ -412,9 +424,9 @@
                      (map (lambda (si) (replace-matches si abstraction)) s)
                      s)
                  (begin
-                   (pretty-print (list "inside replace-matches about to add match instances" unified-vars))
+                   ;;(pretty-print (list "inside replace-matches about to add match instances" unified-vars))
                    (abstraction-instances->add-instance! abstraction unified-vars)
-                   (pretty-print "inside replace-mathces, instance added")
+                   ;;(pretty-print "inside replace-mathces, instance added")
                    (pair (abstraction->name abstraction)
                          (map (lambda (var) (replace-matches (rest (assq var unified-vars)) abstraction))
                               (abstraction->vars abstraction)))))))
@@ -461,14 +473,31 @@
              ,(program->body program)))
 
          
-         
+         ;;if the program being compressed has function/variable symbols with higher indices that what is already in sym then functions might be made with the same name as already existing functions (ASSUMES NO FREE VARIABLES/FUNCTION NAMES)
+         (define (raise-func/var-indices! program)
+           (let* ([defs (program->abstractions program)]
+                  [funcs (map abstraction->name defs)]
+                  [vars (apply append (map abstraction->vars defs))])
+             (cond [(null? defs) '()]
+                   [(null? vars) (raise-tagged! (func-symbol) funcs)]
+                   [else (begin (raise-tagged! (var-symbol) vars)
+                                (raise-tagged! (func-symbol) funcs))])))
+         (define (raise-tagged! tag tagged-symbols)
+           (let ([largest-index (max-index tag tagged-symbols)])
+             (set-symbol-index! tag largest-index)))
+         (define (max-index tag tagged-symbols)
+           (define (get-index tagged-symbol)
+             (string->number (string-drop (symbol->string tagged-symbol) (length (string->list (symbol->string tag))) )))
+           (apply max (map get-index tagged-symbols)))
 
+                  
          ;; compute a list of compressed programs
          (define (compressions program)
-           (let* ([condensed-program (condense-program program)]
-                  [db (pretty-print "programs condensed")]
+           (let* ([none (raise-func/var-indices! program)] ;;in case program already has function symbols and variable symbols higher than current indices
+                  [condensed-program (condense-program program)]
+                  ;;[db (pretty-print "programs condensed")]
                   [abstractions (self-matches (enumerate-tree condensed-program))]
-                  [db (pretty-print "abstractions made")]
+                  ;;[db (pretty-print (list "abstractions made" abstractions))]
                   [valid-abstractions (get/make-valid-abstractions abstractions)] ;; [1]
                   [compressed-programs (map (curry compress-program program) valid-abstractions)]
                   [program-size (size (program->sexpr program))]
@@ -513,8 +542,10 @@
          ;;compress a single step, used as a mcmc proposal
          (define (inverse-inline program prob-inverse-inline prob-inline)
            (pretty-print "inverse-inline")
-           (let* ([possible-compressions (compressions program)]
-                  [db (pretty-print "compressions made")])
+           (let* ([none (set! abstraction-instances (make-hash-table eqv?))]
+                  ;;[db (pretty-print (list "abstraction-instances should be clean" (hash-table->alist abstraction-instances)))] 
+                  [possible-compressions (compressions program)])
+                  ;;[db (pretty-print "compressions made")])
              (if (null? possible-compressions)
                  (list program prob-inverse-inline prob-inverse-inline)
                  (let* ([compression-choice (uniform-draw possible-compressions)]
@@ -540,12 +571,12 @@
            (define get-fw-prob second)
            (define get-bw-prob third)
            (let* ([program (sexpr->program sexpr)]
-                  [db (pretty-print program)]
+                  ;;[db (pretty-print program)]
                   [new-program+fw+bw (proposal program)]
                   [new-sexpr (program->sexpr (get-program new-program+fw+bw))]
                   [fw-prob (get-fw-prob new-program+fw+bw)]
-                  [bw-prob (get-bw-prob new-program+fw+bw)]
-                  [none (reset-symbol-indizes!)])
+                  [bw-prob (get-bw-prob new-program+fw+bw)])
+;;                  [none (reset-symbol-indizes!)])
              (list new-sexpr fw-prob bw-prob)))
 
          ;;inlining or decompression code; returns an expanded program and the probability of moving to that particular expansion
