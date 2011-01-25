@@ -6,7 +6,7 @@
 ;; - make a test case for getting anonymous functions when inlining
 ;; - inlining with higher-order functions leads to loss of irreducibility through the creation of anonymous functions? rewrite applied lambdas in the body of a program 
 (library (pi abstract)
-         (export compressions test-abstraction-proposer abstraction-move sexpr->program proposal beam-compression make-program  pretty-print-program program->sexpr size get-abstractions make-abstraction abstraction->define define->abstraction var? func? normalize-names func-symbol var-symbol)
+         (export compressions test-abstraction-proposer abstraction-move sexpr->program proposal beam-compression make-program  pretty-print-program program->sexpr size get-abstractions make-abstraction abstraction->define define->abstraction var? func? normalize-names func-symbol var-symbol all-iterated-compressions)
          (import (except (rnrs) string-hash string-ci-hash)
                  (only (ikarus) set-car! set-cdr!)
                  (_srfi :1)
@@ -478,7 +478,8 @@
                   
          ;; compute a list of compressed programs
          (define (compressions program)
-           (let* ([none (raise-func/var-indices! program)] ;;in case program already has function symbols and variable symbols higher than current indices
+           (let* ([none (set! abstraction-instances (make-hash-table eqv?))]
+                  [none (raise-func/var-indices! program)] ;;in case program already has function symbols and variable symbols higher than current indices
                   [abstraction-instances (make-hash-table eqv?)]
                   [condensed-program (condense-program program)]
                   [abstractions (self-matches (enumerate-tree condensed-program))]
@@ -525,7 +526,7 @@
 
          ;;compress a single step, used as a mcmc proposal
          (define (inverse-inline program prob-inverse-inline prob-inline)
-           (let* ([none (set! abstraction-instances (make-hash-table eqv?))]
+           (let* (
                   [possible-compressions (compressions program)])
              (if (null? possible-compressions)
                  (list program prob-inverse-inline prob-inverse-inline)
