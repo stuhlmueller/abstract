@@ -6,7 +6,7 @@
 ;; - make a test case for getting anonymous functions when inlining
 ;; - inlining with higher-order functions leads to loss of irreducibility through the creation of anonymous functions? rewrite applied lambdas in the body of a program 
 (library (pi abstract)
-         (export compressions test-abstraction-proposer abstraction-move sexpr->program proposal beam-compression make-program  pretty-print-program program->sexpr size get-abstractions make-abstraction abstraction->define define->abstraction var? func? normalize-names func-symbol var-symbol all-iterated-compressions)
+         (export compressions test-abstraction-proposer abstraction-move sexpr->program proposal beam-compression make-program  pretty-print-program program->sexpr size get-abstractions make-abstraction abstraction->define define->abstraction var? func? normalize-names func-symbol var-symbol all-iterated-compressions inline)
          (import (except (rnrs) string-hash string-ci-hash)
                  (only (ikarus) set-car! set-cdr!)
                  (_srfi :1)
@@ -20,7 +20,7 @@
          (define (identity x) x)
 
          ;;var-symbol and func-symbol are functions that return symbols so that they can be used in bher
-         (define (var-symbol) 'v)
+         (define (var-symbol) 'V)
          (define (func-symbol) 'F)
 
          (define (more-than-one lst)
@@ -526,7 +526,7 @@
 
          ;;compress a single step, used as a mcmc proposal
          (define (inverse-inline program prob-inverse-inline prob-inline)
-           (let* (
+           (let* (;;[db (pretty-print "inverse-inline")]
                   [possible-compressions (compressions program)])
              (if (null? possible-compressions)
                  (list program prob-inverse-inline prob-inverse-inline)
@@ -541,7 +541,7 @@
          (define (proposal program)
            (let* ([prob-inline (- (log 2.0))]
                   [prob-inverse-inline (log (- 1 (exp prob-inline)))])
-             (if (flip prob-inline)
+             (if (flip (exp prob-inline))
                  (inline program prob-inline prob-inverse-inline)
                  (inverse-inline program prob-inverse-inline prob-inline)))) ;;better way to do this?
 
@@ -562,16 +562,21 @@
          ;;inlining or decompression code; returns an expanded program and the probability of moving to that particular expansion
          (define (inline program prob-inline prob-inverse-inline)
            (let* ([abstractions (program->abstractions program)])
+             ;;[db (pretty-print "inline")])
              (if (null? abstractions)
                  ;;is this right? if you inline a program w/o abstraction you cannot get back by inverse-inlining (unless the inverse-inline has no possible abstractions) so should we use the prob-of-inline as the probability of returning to this state
                  (list program prob-inline prob-inline) 
                  (let* ([inline-choice (uniform-draw abstractions)]
                         [remaining-abstractions (delete inline-choice abstractions)]
+                        ;;[db (pretty-print (list "inline abstractions" (length abstractions) program))]
                         [fw-prob (+ prob-inline (- (log (length abstractions))))]
                         [inlined-program (inverse-replace-matches inline-choice (make-program remaining-abstractions (program->body program)))]
                         ;;backward probability is the probability of choosing the abstraction we inlined times probability of inverse inlining
-                        [possible-compressions (compressions inlined-program)]
-                        [bw-prob (+ prob-inverse-inline (- (log (length possible-compressions))))])
+                        [number-possible-compressions (length (compressions inlined-program))]
+                        ;;[db (pretty-print (list "inline compressions" (length possible-compressions) inlined-program))]
+                        [bw-prob (if (= 0 number-possible-compressions)
+                                     -inf.0
+                                     (+ prob-inverse-inline (- (log number-possible-compressions))))])
                    (list inlined-program fw-prob bw-prob)))))
          
 
