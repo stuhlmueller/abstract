@@ -1,11 +1,14 @@
 #!r6rs
-
+;;TO DO
+;;-adjust tree-apply-proc to not be dependent on * as a masking character
+;;-use data abstraction for location in tree-apply-proc
 (library (util)
-         (export all-equal? all-assoc curry all max-take sexp-replace sexp-search get/make-alist-entry)
+         (export all-equal? all-assoc curry all max-take sexp-replace sexp-search get/make-alist-entry rest pair random-from-range depth tree-apply-proc primitive?)
          (import (except (rnrs) string-hash string-ci-hash)
                  (only (ikarus) set-car! set-cdr!)
                  (_srfi :1)
                  (_srfi :69)
+                 (scheme-tools repl)
                  (church readable-scheme))
 
          (define (all-equal? lst)
@@ -35,9 +38,7 @@
                (if (list? sexp)
                    (map (curry sexp-replace old new) sexp)
                    sexp)))
-
-         (define (primitive? expr)
-           (or (symbol? expr) (boolean? expr) (number? expr)))         
+               
 
          (define (sexp-search pred? func sexp)
            (if (list? sexp)
@@ -53,4 +54,37 @@
                  (let* ([default-val (default-thunk)])
                    (alist-set! key default-val)
                    default-val))))
-)
+
+         (define (random-from-range a b)
+           (+ (random-integer (+ (- b a) 1)) a))
+
+         (define (primitive? expr)
+           (or (symbol? expr) (boolean? expr) (number? expr)))
+
+           
+
+         (define (depth tree)
+           (if (or (not (list? tree)) (null? tree))
+               0
+               (+ 1 (apply max (map depth tree)))))
+
+         ;;this function copies a tree, but applies proc to the tree at the passed in location.  
+         (define (tree-apply-proc proc location tree)
+           (define (build-mask location number-of-branches)
+             (define (substitute indx value lst)
+               (if (= indx 0)
+                   (pair value (rest lst))
+                   (pair (first lst) (substitute (- indx 1) value (rest lst)))))
+             (let ([mask (make-list number-of-branches '*)]
+                   [index (- (first location) 1)])
+               (if (= (length location) 1)
+                   (substitute index '() mask)
+                   (substitute index (rest location) mask))))
+           
+           (cond [(null? tree) tree]
+                 [(null? location) (proc tree)]
+                 [(eq? location '*) tree]
+                 [else
+                  (let ([location-mask (build-mask location (length (rest tree)))])
+                    (pair (first tree) (map (curry tree-apply-proc proc) location-mask (rest tree))))])))
+
