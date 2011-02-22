@@ -6,13 +6,26 @@
         (srfi :78 lightweight-testing)
         (_srfi :1))
 
+;;bug when compressing the following 
+(define test-data '(let () (begin (let () (define F1 (lambda (V1) (set-pixel! i V1 4 1))) (begin (F1 3) (F1 4) (F1 5) (F1 6) (F1 7))) (let () (define F1 (lambda (V1) (set-pixel! i V1 4 1))) (begin (F1 15) (F1 14) (F1 13) (F1 12) (F1 11))) (let () (define F1 (lambda (V1) (set-pixel! i V1 4 1))) (begin (F1 21) (F1 19) (F1 20) (F1 17) (F1 18))))))
+
+;;(define test-data '(let () (begin (let () (define F1 (lambda (V1) (set-pixel! i V1 4 1))) (begin (F1 3) (F1 4))) (let () (define F1 (lambda (V1) (set-pixel! i V1 4 1))) (begin (F1 15) (F1 14))))))
+
+
+
+(define program-form (sexpr->program test-data))
+
+(pretty-print (map program->sexpr (compressions program-form)))
+(exit)
 ;;;abstraction-proposer tests
 ;;(define test-expr '(let () #t))
 ;;(define test-expr '(let () (if (if #t #t #t) (if #t #t #t) (if #t #t #t))))
-(define test-expr '(let () (define F1 (lambda () #t)) (or (and (F1) (F1) (F1)) (and (F1) (F1) (F1)) (and (F1) (F1) (F1)))))
-(define program-form (sexpr->program test-expr))
 
-(pretty-print (abstraction-move test-expr))
+;;test for making sure abstraction names don't conflict with names existing in the data being compressed
+;; (define test-expr '(let () (define F1 (lambda () #t)) (or (and (F1) (F1) (F1)) (and (F1) (F1) (F1)) (and (F1) (F1) (F1)))))
+;; (define program-form (sexpr->program test-expr))
+
+;;(pretty-print (abstraction-move test-expr))
 ;;(define test-expr1 (abstraction-move test-expr))
 ;;(pretty-print (list "texp" (first test-expr1)))
 ;;make sure the output of abstraction-proposer is an sexpr of the right form, use match library

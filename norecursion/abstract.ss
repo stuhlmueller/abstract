@@ -156,6 +156,7 @@
          (define (shortest-n n programs)
            (max-take (sort-by-size programs) n))
 
+         ;;used to ensure all function and variable names are in consecutive order; important for when trying to generate a program from a grammar that matches a compressed program
          (define (normalize-names expr)
            (define ht (make-hash-table eqv?))
            (define (traverse action expr)
@@ -363,7 +364,7 @@
                    (let* ([none (replace-matches exp1 abstraction)]  ;;only used to track instances where an abstraction is used
                           [none (replace-matches exp2 abstraction)] ;;only used to track instances where an abstraction is used
                           [reduced-abstractions (list st1 st2 (remove-redundant-variables abstraction))]
-                          [none (set! abstraction-instances (make-hash-table eqv?))])  ;;prevents abstract-instances from growing too big
+                          [none (set! abstraction-instances (make-hash-table eqv?))])  ;;prevents abstract-instances from growing too big; called here because instances have already been examined for common variables
                      reduced-abstractions)
                    (list st1 st2 #f))))
            (let ([sts (all-subtrees et)])
@@ -430,18 +431,20 @@
                   [no-free-vars (map capture-vars non-false)])
              no-free-vars))
 
+         ;;free variables can occur when the pattern for an abstraction contains variables that were part of the matched expressions e.g. if the expression was (+ v1 v1 a) (+ v1 v1 b) then the pattern would be ((+ v1 v1 v2)
          (define (capture-vars abstraction)
            (let* ([free-vars (get-free-vars abstraction)]
-                  [new-vars (append free-vars (abstraction->vars abstraction))]
+                  [new-vars (append free-vars (abstraction->vars abstraction))] 
                   [old-pattern (abstraction->pattern abstraction)]
                   [old-name (abstraction->name abstraction)])
              (if (null? free-vars)
                  abstraction
                  (let ([no-free-abstraction (make-named-abstraction old-name old-pattern new-vars)])
-                   (hash-table-update! abstraction-instances old-name (lambda (original) (make-abstraction-history new-vars)))
+                   ;;(hash-table-update! abstraction-instances old-name (lambda (original) (make-abstraction-history new-vars)))
                    no-free-abstraction)
                  )))
 
+         ;;searches through the body of the abstraction  and returns a list of free variables
          (define (get-free-vars abstraction)
            (let* ([pattern (abstraction->pattern abstraction)]
                   [non-free (abstraction->vars abstraction)]
@@ -562,7 +565,7 @@
          ;;inlining or decompression code; returns an expanded program and the probability of moving to that particular expansion
          (define (inline program prob-inline prob-inverse-inline)
            (let* ([abstractions (program->abstractions program)])
-             ;;[db (pretty-print "inline")])
+                  ;;[db (pretty-print "inline")])
              (if (null? abstractions)
                  ;;is this right? if you inline a program w/o abstraction you cannot get back by inverse-inlining (unless the inverse-inline has no possible abstractions) so should we use the prob-of-inline as the probability of returning to this state
                  (list program prob-inline prob-inline) 
@@ -573,10 +576,11 @@
                         [inlined-program (inverse-replace-matches inline-choice (make-program remaining-abstractions (program->body program)))]
                         ;;backward probability is the probability of choosing the abstraction we inlined times probability of inverse inlining
                         [number-possible-compressions (length (compressions inlined-program))]
-                        ;;[db (pretty-print (list "inline compressions" (length possible-compressions) inlined-program))]
+                        ;;[db (pretty-print (list "inline compressions" number-possible-compressions prob-inverse-inline))]
                         [bw-prob (if (= 0 number-possible-compressions)
                                      -inf.0
                                      (+ prob-inverse-inline (- (log number-possible-compressions))))])
+                        ;;[db (pretty-print (list "fw bw" fw-prob bw-prob))])
                    (list inlined-program fw-prob bw-prob)))))
          
 
