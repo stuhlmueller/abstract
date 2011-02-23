@@ -1,23 +1,27 @@
 #!r6rs
 
 ;; TODO:
-;; - inline probabilities need to take into account depth of recursion generated for recursive abstractions
+
+
+;; - make a test case for getting anonymous functions when inlining
 ;; - inlining with higher-order functions leads to loss of irreducibility through the creation of anonymous functions? rewrite applied lambdas in the body of a program 
-;; - make flip in recursion parameterized?
-;; - ignore size for definition of recursion pattern to encourage its use
-;; - modify abstraction-instances to have bounded size
 (library (abstract)
-         (export beam-compression pretty-print-program program->sexpr size)
+         (export compressions test-abstraction-proposer abstraction-move sexpr->program proposal beam-compression make-program  pretty-print-program program->sexpr size get-abstractions make-abstraction abstraction->define define->abstraction var? func? normalize-names func-symbol var-symbol all-iterated-compressions inline)
          (import (except (rnrs) string-hash string-ci-hash)
                  (only (ikarus) set-car! set-cdr!)
                  (_srfi :1)
                  (_srfi :69)
+                 (only (srfi :13) string-drop)
                  (church readable-scheme)
                  (util)
                  (sym)
                  (mem))
 
          (define (identity x) x)
+
+         ;;var-symbol and func-symbol are functions that return symbols so that they can be used in bher
+         (define (var-symbol) 'V)
+         (define (func-symbol) 'F)
 
          (define (more-than-one lst)
            (> (length lst) 1))
@@ -43,11 +47,20 @@
          ;;temp fix b/c problems access to srfi 13
          (define (var? expr)
            (if (symbol? expr)
-               (let* ([var-pattern "v"]
+               (let* ([var-string (symbol->string (var-symbol))]
                       [string-expr (symbol->string expr)])
                  ;; (string-prefix? var-pattern string-expr))))
-                 (equal? (substring string-expr 0 1) "v"))
+                 (equal? (substring string-expr 0 1) var-string))
                #f))
+
+         (define (func? expr)
+           (if (symbol? expr)
+               (let* ([func-string (symbol->string (func-symbol))]
+                      [string-expr (symbol->string expr)])
+                 ;; (string-prefix? var-pattern string-expr))))
+                 (equal? (substring string-expr 0 1) func-string))
+               #f))
+
 
 
          ;; data structures & associated functions
@@ -56,48 +69,20 @@
          (define etree->children cddr)
 
          (define (make-abstraction pattern variables)
-           (make-named-abstraction (sym 'F) pattern variables))
+           (make-named-abstraction (sym (func-symbol)) pattern variables))
          (define (make-named-abstraction name pattern variables)
            (list 'abstraction name variables pattern))
-         (define (make-recursion-abstraction details)
-           (let* ((function (recursion-details->function details))
-                  (base-case (recursion-details->base-case details))
-                  (recursion-name (sym 'R))
-                  (flip-val .9))
-             (list 'abstraction  recursion-name '() `(if (flip) (,function ,base-case) (,function (,recursion-name))))))
-
-         ;;takes advantage of the fixed form in make-recursion-abstraction
-         (define (recursion-abstraction->details abstraction)
-           (let* ([pattern (abstraction->pattern abstraction)])
-             (third pattern)))
-         
-
-         ;;checks if an abstraction is a recursion by seeing if the pattern uses the name of the abstraction; can also rewrite to take advantage of fixed pattern for recursions...if speed needed
-         (define recursion-abstraction?
-           (mem (lambda (abstraction)
-                  (let ([name (abstraction->name abstraction)]
-                        [pattern (abstraction->pattern abstraction)])
-                    (define (name-used? sexp)
-                      (if (list? sexp)
-                          (any true? (map name-used? sexp))
-                          (if (equal? sexp name)
-                              #t
-                              #f)))
-                    (name-used? pattern)))))
-
-         (define recursion-details->function first)
-         (define recursion-details->base-case second)
 
          (define abstraction->name second)
          (define abstraction->vars third)
          (define abstraction->pattern fourth)
 
-         ;; make a define statement out of an abstraction
+         ;; make a define statement out of an abstraction, format is (define name (lambda (vars) body))
          (define (abstraction->define abstraction)
            (let ((name (abstraction->name abstraction))
                  (variables (abstraction->vars abstraction))
                  (pattern (abstraction->pattern abstraction)))
-             (list 'define (pair name variables) pattern)))
+             (list 'define name (list 'lambda variables pattern))))
 
          (define (make-program abstractions body)
            (list 'program abstractions body))
@@ -108,6 +93,53 @@
            `(let ()  
               ,@(map abstraction->define (program->abstractions program))
               ,(program->body program)))
+
+         ;;assumes format of (let () definitions body); if format fails to hold then program is an empty set of abstractions and the sexpr as the body
+         (define (sexpr->program sexpr)
+           (define (abstraction-sexpr? x)
+             (if (and (not (null? x)) (list? x))
+                 (equal? (first x) 'define)
+                 #f))
+           (let*-values ([(no-scope-sexpr) (remove-scope sexpr)]
+                         [(abstractions body) (span abstraction-sexpr? no-scope-sexpr)])
+             (make-program (map define->abstraction abstractions) (first body))))
+
+         (define (sexpr->signatures sexpr)
+           (let* ([program (sexpr->program sexpr)]
+                  [defs (program->abstractions program)]
+                  [names (map abstraction->name defs)]
+                  [vars (map abstraction->vars defs)])
+             (map pair names vars)))
+
+
+         (define (remove-scope sexpr)
+           (define (scope? x)
+             (or (equal? 'let x) (null? x)))
+           (let*-values ([(scope program) (span scope? sexpr)])
+             program))
+         
+         (define (get-abstractions sexpr)
+           (define (abstraction-sexpr x)
+             (if (and (not (null? x)) (list? x))
+                 (equal? (first x) 'define)
+                 #f))
+           (define (get-defines sexpr)
+             (if (list? sexpr)
+                 (filter 
+                         sexpr)
+                 '()))
+           (map define->abstraction (get-defines sexpr)))
+
+         ;;define is of the form (define name (lambda (vars) body))
+         (define (define->abstraction definition)
+           (let* ([name (second definition)]
+                  [vars (second (third definition))]
+                  [body (third (third definition))])
+             (make-named-abstraction name body vars)))
+
+         ;;assumes program in sexpr form is (let () definitions body)
+         (define (get-body sexpr)
+           #f)
 
          ;; FIXME: assumes that there is only one program for each size
          (define (unique-programs programs)
@@ -124,12 +156,34 @@
          (define (shortest-n n programs)
            (max-take (sort-by-size programs) n))
 
+         ;;used to ensure all function and variable names are in consecutive order; important for when trying to generate a program from a grammar that matches a compressed program
+         (define (normalize-names expr)
+           (define ht (make-hash-table eqv?))
+           (define (traverse action expr)
+             (if (or (primitive? expr) (null? expr))
+                 (if (or (func? expr) (var? expr))
+                     (action expr)
+                     expr)
+                 (map (curry traverse action) expr)))
+           ;;build table
+           (define (add-to-table expr)
+             (if (func? expr)
+                 (hash-table-set! ht expr (sym (func-symbol)))
+                 (hash-table-set! ht expr (sym (var-symbol)))))
+           (define (relabel expr)
+             (hash-table-ref ht expr))
+           (reset-symbol-indizes!)
+           (let* ([signatures (sexpr->signatures expr)])
+             (traverse add-to-table signatures))
+           (traverse relabel expr))
+         
+
 
          ;; a history of how each pattern was used, the keys to the hashtable
          ;; are names of abstractions and the entries are hashtables where the
          ;; keys are variable names for the abstractions and the values are
          ;; lists of past instances
-         (define abstraction-instances (make-hash-table eqv?))
+         (define abstraction-instances (make-hash-table (make-hash-table eqv?)))
          (define (abstraction-instances->get-instances abstraction)
            (hash-table-ref abstraction-instances (abstraction->name abstraction)))
          (define (abstraction-instances->add-instance! abstraction unified-vars)
@@ -213,12 +267,12 @@
          ;; into an enumerated tree like
          ;; ($1 a ($2 b) ($3 c (4 d)) ($5 e ($6 f)))
          (define (enumerate-tree t)
-           (if (symbol? t)
+           (if (primitive? t)
                t
                (pair (sym '$) (map enumerate-tree t))))
 
          (define (unenumerate-tree t)
-           (if (symbol? t)
+           (if (primitive? t)
                t
                (map unenumerate-tree (rest t))))
 
@@ -226,14 +280,15 @@
          (define (all-subtrees t)
            (let loop ([t (list t)])
              (cond [(null? t) '()]
-                   [(number? (first t)) (loop (rest t))]
-                   [(symbol? (first t)) (loop (rest t))]
+                   [(primitive? (first t)) (loop (rest t))]
+;;                   [(number? (first t)) (loop (rest t))]
+;;                   [(symbol? (first t)) (loop (rest t))]
                    [else (pair (first t) (loop (append (first t) (rest t))))])))
 
          ;; is obj a list like '(x)?
          (define (singleton? obj)
            (and (pair? obj)
-                (symbol? (first obj))
+                (primitive? (first obj))
                 (null? (rest obj))))
 
 
@@ -244,7 +299,6 @@
          ;; (z (a (x (k (l)) (h (m)))) (c) (d (h (f)) (i)))
          ;; this:
          ;; (z (a (x (* (*)) (h (m)))) (c) (d * (i)))
-         ;; also checks to see if the trees fit the recursion pattern
          ;; (f (f (f c)))
          ;; (f (f c))
          ;; returns:
@@ -254,11 +308,11 @@
                   (begin 
                     (define variables '())
                     (define (add-variable!)
-                      (set! variables (pair (sym 'v) variables))
+                      (set! variables (pair (sym (var-symbol)) variables))
                       (first variables))
                     (define (build-pattern et1 et2 ignore-id-matches)
-                      (cond [(and (symbol? et1) (symbol? et2)) (if (eq? et1 et2) et1 (add-variable!))]
-                            [(or (symbol? et1) (symbol? et2)) (add-variable!)]
+                      (cond [(and (primitive? et1) (primitive? et2)) (if (eq? et1 et2) et1 (add-variable!))]
+                            [(or (primitive? et1) (primitive? et2)) (add-variable!)]
                             [(and ignore-id-matches (eqv? (etree->id et1) (etree->id et2))) #f]
                             [(not (eqv? (length et1) (length et2))) (add-variable!)]
                             [else
@@ -275,52 +329,20 @@
          ;; (single variable or singleton list)
          ;; returns an abstraction or #f
          (define (filtered-anti-unify et1 et2 ignore-id-matches)
-           (let* ((recursion-details (recursive-pattern? (unenumerate-tree et1) (unenumerate-tree et2))))
-             (if recursion-details
-                 (make-recursion-abstraction recursion-details)
-                 (let* ([variables-pattern (anti-unify et1 et2 ignore-id-matches)]
-                        [variables (first variables-pattern)]
-                        [pattern (second variables-pattern)])
-                   (begin
-                     (define (plain-var-list? pattern)
-                       (all (map (lambda (i) (member i variables)) pattern)))
-                     (if (or (member pattern variables)
-                             (singleton? pattern)
-                             (and (list? pattern) (plain-var-list? pattern)))
-                         #f
-                         (if (false? pattern)
-                             #f
-                             (make-abstraction pattern variables))))))))
+           (let* ([variables-pattern (anti-unify et1 et2 ignore-id-matches)]
+                  [variables (first variables-pattern)]
+                  [pattern (second variables-pattern)])
+             (begin
+               (define (plain-var-list? pattern)
+                 (all (map (lambda (i) (member i variables)) pattern)))
+               (if (or (member pattern variables)
+                       (singleton? pattern)
+                       (and (list? pattern) (plain-var-list? pattern)))
+                   #f
+                   (if (false? pattern)
+                       #f
+                       (make-abstraction pattern variables))))))
 
-         ;; (define (make-recursion-abstraction recursion-details)
-         ;;   (let* ((recursion-name (sym 'R))
-         ;;          (function (recursion-details->function recursion-details))
-         ;;          (base-case (recursion-details->base-case recursion-details)))
-         ;;     (list 'abstraction recursion-name (list function (define (,recusion-name) (if (flip) (,function ,base-case ) (,function (,recursion-name))))))
-         ;;a function to see if two trees have the same recursive pattern
-         (define (recursive-pattern? t1 t2)
-           (let ((recursion1 (recursive? t1))
-                 (recursion2 (recursive? t2)))
-             (if (and recursion1 recursion2 (equal? recursion1 recursion2)) 
-                 recursion1
-                 #f)))
-
-         (define function-name first)
-
-         ;;checks if a tree is a recursive function call and returns the function name and base case if it is and #f if not
-         (define (recursive? tree)
-           (define (function-call? tree)
-             (and (list? tree) (eq? 2 (length tree))))
-
-           (define arg second)
-           
-           (if (not (function-call? tree))
-               #f
-               (if (function-call? (arg tree))
-                   (let* ((function1 (function-name tree))
-                          (function2 (function-name (arg tree))))
-                     (and (equal? function1 function2) (recursive? (arg tree))))
-                   tree)))
 
          ;; anti-unify all combinations of subtrees
          (define (common-subtrees et1 et2 ignore-id-matches)
@@ -339,10 +361,11 @@
                     [exp1 (unenumerate-tree st1)]
                     [exp2 (unenumerate-tree st2)])
                (if abstraction 
-                   (begin 
-                     (replace-matches exp1 abstraction)
-                     (replace-matches exp2 abstraction)
-                     (list st1 st2 (remove-redundant-variables abstraction)))
+                   (let* ([none (replace-matches exp1 abstraction)]  ;;only used to track instances where an abstraction is used
+                          [none (replace-matches exp2 abstraction)] ;;only used to track instances where an abstraction is used
+                          [reduced-abstractions (list st1 st2 (remove-redundant-variables abstraction))]
+                          [none (set! abstraction-instances (make-hash-table eqv?))])  ;;prevents abstract-instances from growing too big; called here because instances have already been examined for common variables
+                     reduced-abstractions)
                    (list st1 st2 #f))))
            (let ([sts (all-subtrees et)])
              (unique-commutative-pairs sts fau)))
@@ -362,8 +385,8 @@
                     (define (variable? obj)
                       (member obj vars))
                     (cond [(variable? sv) (list (pair sv s))]
-                          [(and (symbol? s) (symbol? sv)) (if (eq? s sv) '() #f)]
-                          [(or (symbol? s) (symbol? sv)) #f]
+                          [(and (primitive? s) (primitive? sv)) (if (eq? s sv) '() #f)]
+                          [(or (primitive? s) (primitive? sv)) #f]
                           [(not (eqv? (length s) (length sv))) #f]
                           [else
                            (let ([assignments (map (lambda (si sj) (unify si sj vars)) s sv)])
@@ -381,48 +404,18 @@
 
          ;; doesn't deal with partial matches, could use more error checking; 
          (define (replace-matches s abstraction)
-           (let* ((recursion-details (recursive? s)))
-             (if (recursion-match? abstraction recursion-details)
-                 (replace-recursion abstraction recursion-details) 
-                 (let ([unified-vars (unify s
-                                            (abstraction->pattern abstraction)
-                                            (abstraction->vars abstraction))])
-                   (if (false? unified-vars)
-                       (if (list? s)
-                           (map (lambda (si) (replace-matches si abstraction)) s)
-                           s)
-                       (begin
-                         (abstraction-instances->add-instance! abstraction unified-vars)
-                         (pair (abstraction->name abstraction)
-                               (map (lambda (var) (replace-matches (rest (assq var unified-vars)) abstraction))
-                                    (abstraction->vars abstraction)))))))))
-
-         (define (recursion-match? abstraction instance-details)
-           (if (recursion-abstraction? abstraction)
-               (let* ((abstraction-details (recursion-abstraction->details abstraction)))
-                 (equal? instance-details abstraction-details))
-               #f))
-         
-         ;;replaces expressions that match the recursion pattern with the recursive pattern
-         (define (replace-recursion abstraction details)
-           (let ([vars (abstraction->vars abstraction)])
-             (abstraction-instances->add-instance! abstraction '())
-             (if (null? vars)
+           (let ([unified-vars (unify s
+                                      (abstraction->pattern abstraction)
+                                      (abstraction->vars abstraction))])
+             (if (false? unified-vars)
+                 (if (list? s)
+                     (map (lambda (si) (replace-matches si abstraction)) s)
+                     s)
                  (begin
-                   (list (abstraction->name abstraction)))
-                 (let ([unified-vars (unify-recursion abstraction details)])
-                   (pair (abstraction->name abstraction) unified-vars)))))
-
-         ;;this occurs when the recursion abstraction is created from another abstraction and either the base-case or function-call is a variable in the other abstraction
-         (define (unify-recursion abstraction details)
-           (let ([vars (abstraction->vars abstraction)]
-                 [pattern (abstraction->pattern abstraction)])
-             (map (curry unify-recursive-var pattern details) vars)))
-
-         (define (unify-recursive-var pattern details var)
-           (if (base-case? pattern var)
-               (recursion-details->base-case details)
-               (recursion-details->function details)))
+                   (abstraction-instances->add-instance! abstraction unified-vars)
+                   (pair (abstraction->name abstraction)
+                         (map (lambda (var) (replace-matches (rest (assq var unified-vars)) abstraction))
+                              (abstraction->vars abstraction)))))))
 
          (define (base-case? pattern var)
            (equal? (second (third pattern)) var))
@@ -438,18 +431,20 @@
                   [no-free-vars (map capture-vars non-false)])
              no-free-vars))
 
+         ;;free variables can occur when the pattern for an abstraction contains variables that were part of the matched expressions e.g. if the expression was (+ v1 v1 a) (+ v1 v1 b) then the pattern would be ((+ v1 v1 v2)
          (define (capture-vars abstraction)
            (let* ([free-vars (get-free-vars abstraction)]
-                  [new-vars (append free-vars (abstraction->vars abstraction))]
+                  [new-vars (append free-vars (abstraction->vars abstraction))] 
                   [old-pattern (abstraction->pattern abstraction)]
                   [old-name (abstraction->name abstraction)])
              (if (null? free-vars)
                  abstraction
                  (let ([no-free-abstraction (make-named-abstraction old-name old-pattern new-vars)])
-                   (hash-table-update! abstraction-instances old-name (lambda (original) (make-abstraction-history new-vars)))
+                   ;;(hash-table-update! abstraction-instances old-name (lambda (original) (make-abstraction-history new-vars)))
                    no-free-abstraction)
                  )))
 
+         ;;searches through the body of the abstraction  and returns a list of free variables
          (define (get-free-vars abstraction)
            (let* ([pattern (abstraction->pattern abstraction)]
                   [non-free (abstraction->vars abstraction)]
@@ -466,11 +461,30 @@
              ,(program->body program)))
 
          
-         
+         ;;if the program being compressed has function/variable symbols with higher indices that what is already in sym then functions might be made with the same name as already existing functions (ASSUMES NO FREE VARIABLES/FUNCTION NAMES)
+         (define (raise-func/var-indices! program)
+           (let* ([defs (program->abstractions program)]
+                  [funcs (map abstraction->name defs)]
+                  [vars (apply append (map abstraction->vars defs))])
+             (cond [(null? defs) '()]
+                   [(null? vars) (raise-tagged! (func-symbol) funcs)]
+                   [else (begin (raise-tagged! (var-symbol) vars)
+                                (raise-tagged! (func-symbol) funcs))])))
+         (define (raise-tagged! tag tagged-symbols)
+           (let ([largest-index (max-index tag tagged-symbols)])
+             (set-symbol-index! tag largest-index)))
+         (define (max-index tag tagged-symbols)
+           (define (get-index tagged-symbol)
+             (string->number (string-drop (symbol->string tagged-symbol) (length (string->list (symbol->string tag))) )))
+           (apply max (map get-index tagged-symbols)))
 
+                  
          ;; compute a list of compressed programs
          (define (compressions program)
-           (let* ([condensed-program (condense-program program)]
+           (let* ([none (set! abstraction-instances (make-hash-table eqv?))]
+                  [none (raise-func/var-indices! program)] ;;in case program already has function symbols and variable symbols higher than current indices
+                  [abstraction-instances (make-hash-table eqv?)]
+                  [condensed-program (condense-program program)]
                   [abstractions (self-matches (enumerate-tree condensed-program))]
                   [valid-abstractions (get/make-valid-abstractions abstractions)] ;; [1]
                   [compressed-programs (map (curry compress-program program) valid-abstractions)]
@@ -514,36 +528,64 @@
                                   program))
 
          ;;compress a single step, used as a mcmc proposal
-         (define (inverse-inline program prob-of-inline)
-           (pretty-print "inverse-inline")
-           (let* ([possible-compressions (compressions program)])
+         (define (inverse-inline program prob-inverse-inline prob-inline)
+           (let* (;;[db (pretty-print "inverse-inline")]
+                  [possible-compressions (compressions program)])
              (if (null? possible-compressions)
-                 (list program prob-of-inline)
+                 (list program prob-inverse-inline prob-inverse-inline)
                  (let* ([compression-choice (uniform-draw possible-compressions)]
-                        [prob (* prob-of-inline (/ 1 (length possible-compressions)))])
-                   (list compression-choice prob)))))
+                        [fw-prob (+ prob-inverse-inline (- (log (length possible-compressions))))]
+                        ;;backward probability is the probability of choosing the abstraction to inline
+                        [abstractions (program->abstractions compression-choice)]
+                        [bw-prob (+ prob-inline (- (log (length abstractions))))])
+                   (list compression-choice fw-prob bw-prob)))))
 
          ;;returns a new proposal along with forward/backward probability, used in mcmc
          (define (proposal program)
-           (let ([prob-of-inline .5])
-             (if (flip prob-of-inline)
-                 (inline program prob-of-inline)
-                 (inverse-inline program prob-of-inline))))
+           (let* ([prob-inline (- (log 2.0))]
+                  [prob-inverse-inline (log (- 1 (exp prob-inline)))])
+             (if (flip (exp prob-inline))
+                 (inline program prob-inline prob-inverse-inline)
+                 (inverse-inline program prob-inverse-inline prob-inline)))) ;;better way to do this?
 
+         (define (test-abstraction-proposer sexpr)
+           (list '(if t f t) (log .2) (log .8)))
+         
+         (define (abstraction-move sexpr)
+           (define get-program first)
+           (define get-fw-prob second)
+           (define get-bw-prob third)
+           (let* ([program (sexpr->program sexpr)]
+                  [new-program+fw+bw (proposal program)]
+                  [new-sexpr (program->sexpr (get-program new-program+fw+bw))]
+                  [fw-prob (get-fw-prob new-program+fw+bw)]
+                  [bw-prob (get-bw-prob new-program+fw+bw)])
+             (list new-sexpr fw-prob bw-prob)))
 
          ;;inlining or decompression code; returns an expanded program and the probability of moving to that particular expansion
-         (define (inline program prob-of-inline)
-           (pretty-print "inline")
+         (define (inline program prob-inline prob-inverse-inline)
            (let* ([abstractions (program->abstractions program)])
+                  ;;[db (pretty-print "inline")])
              (if (null? abstractions)
-                 (list program prob-of-inline)
+                 ;;is this right? if you inline a program w/o abstraction you cannot get back by inverse-inlining (unless the inverse-inline has no possible abstractions) so should we use the prob-of-inline as the probability of returning to this state
+                 (list program prob-inline prob-inline) 
                  (let* ([inline-choice (uniform-draw abstractions)]
                         [remaining-abstractions (delete inline-choice abstractions)]
-                        [prob (* prob-of-inline (/ 1 (length abstractions)))])
-                   (list (inverse-replace-matches inline-choice (make-program remaining-abstractions (program->body program))) prob)))))
+                        ;;[db (pretty-print (list "inline abstractions" (length abstractions) program))]
+                        [fw-prob (+ prob-inline (- (log (length abstractions))))]
+                        [inlined-program (inverse-replace-matches inline-choice (make-program remaining-abstractions (program->body program)))]
+                        ;;backward probability is the probability of choosing the abstraction we inlined times probability of inverse inlining
+                        [number-possible-compressions (length (compressions inlined-program))]
+                        ;;[db (pretty-print (list "inline compressions" number-possible-compressions prob-inverse-inline))]
+                        [bw-prob (if (= 0 number-possible-compressions)
+                                     -inf.0
+                                     (+ prob-inverse-inline (- (log number-possible-compressions))))])
+                        ;;[db (pretty-print (list "fw bw" fw-prob bw-prob))])
+                   (list inlined-program fw-prob bw-prob)))))
          
 
          ;;given a program body and an abstraction replace all function applications of teh abstraction in the body with the instantiated pattern
+         ;;FIXME needs to be called recursively on subexpressions
          (define (inverse-replace-matches abstraction sexpr)
            (cond
             [(abstraction-instance? sexpr abstraction)
@@ -567,22 +609,9 @@
          (define (instantiate-pattern sexpr abstraction)
            (cond [(equal? sexpr (abstraction->name abstraction))
                   (make-anon abstraction)]
-                 [(recursion-abstraction? abstraction)
-                  (inline-recursion abstraction)]
                  [else (let* ([var-values (rest sexpr)]
                               [var-names (abstraction->vars abstraction)])
                          (fold replace-var (abstraction->pattern abstraction) (zip var-names var-values)))]))
-
-         (define (inline-recursion abstraction)
-           (let* ([details (recursion-abstraction->details abstraction)]
-                  [function (recursion-details->function details)]
-                  [base (recursion-details->base-case details)])
-             (define (generate)
-               (if (flip .1)
-                   base
-                   (pair function (list (generate)))))
-             (generate)))
-         
 
          (define (make-anon abstraction)
            `(lambda ,(abstraction->vars abstraction) ,(abstraction->pattern abstraction)))
@@ -620,11 +649,6 @@
     
 
 
-;;- write unify-recursion
-
-;; ;; - maybe add special case to rewrite; applied anonymous functions rewritten as the body of the lambda with the variables filled in
-
-;; - think about whether you need to modify the abstraction-instances when inlining
 
 ;; -potential issue if you try to inline a function that calls itself and it is not in the form (f (f (f (x))))); if you start from programs without abstraction this may never occur since any recursive function should abstract to (f(f(f(x)))) form 
 
