@@ -1,6 +1,7 @@
 #!r6rs
 ;;TODO:
 ;;- figure out a good way to test a library w/o exporting all the functions
+(import (abstract))
 
 ;; (define (test-unify)
 ;;   (let* ([sexpr '(a b c d)]
@@ -27,15 +28,15 @@
 ;;     (pretty-print (replace-matches test-tree abstraction))
 ;;     (pretty-print (replace-matches test-tree abstraction2))))
 
-;; (define (test-compression sexpr)
-;;   (for-each display (list "original expr:\n" sexpr "\n"
-;;                           "size: " (size sexpr)
-;;                           "\n\n"
-;;                           "compressed exprs:\n"))
-;;   (map pretty-print-program
-;;        (sort-by-size
-;;         (unique-programs
-;;          (beam-search-compressions 10 (make-program '() sexpr))))))
+(define (test-compression sexpr)
+  (for-each display (list "original expr:\n" sexpr "\n"
+                          "size: " (size sexpr)
+                          "\n\n"
+                          "compressed exprs:\n"))
+  (map pretty-print-program
+       (sort-by-size
+        (unique-programs
+         (beam-search-compressions 10 (make-program '() sexpr))))))
 
 ;; (define (test-redundant-variables)
 ;;   (let* ([tabs (make-abstraction '(+ A B C D) '(A B C D))]
@@ -75,6 +76,8 @@
         
 ;; ;;(test-inline)
 ;; ;;(recursive? '(f (f x)))
+;;;compression test for sexpr without comrpessions
+(test-compression '('a))
 ;; ;;(test-compression '((f (f (f (f x)))) (f (f (f (f x)))) (f (f (f (f x)))) (g (f (f (f x))))))
 ;; ;; (test-repeated-variable-pattern)
 ;; ;; (test-compression '((f (f (f (f (f (f (f (f (f (f (f (f x))))))))))))))

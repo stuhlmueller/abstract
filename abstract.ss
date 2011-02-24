@@ -6,7 +6,7 @@
 ;; - make a test case for getting anonymous functions when inlining
 ;; - inlining with higher-order functions leads to loss of irreducibility through the creation of anonymous functions? rewrite applied lambdas in the body of a program 
 (library (abstract)
-         (export compressions test-abstraction-proposer abstraction-move sexpr->program proposal beam-compression make-program  pretty-print-program program->sexpr size get-abstractions make-abstraction abstraction->define define->abstraction var? func? normalize-names func-symbol var-symbol all-iterated-compressions inline)
+         (export compressions test-abstraction-proposer abstraction-move sexpr->program proposal beam-search-compressions beam-compression make-program  pretty-print-program program->sexpr size get-abstractions make-abstraction abstraction->define define->abstraction var? func? normalize-names func-symbol var-symbol all-iterated-compressions iterated-compressions inline unique-programs sort-by-size)
          (import (except (rnrs) string-hash string-ci-hash)
                  (only (ikarus) set-car! set-cdr!)
                  (_srfi :1)
@@ -641,9 +641,12 @@
                                    "size: " (size sexpr)
                                    "\n\n"
                                    "compressing...\n"))
-           (first (sort-by-size
-            (unique-programs
-             (beam-search-compressions beam-size (make-program '() sexpr))))))
+           (let ([top-compressions (sort-by-size
+                                    (unique-programs
+                                     (beam-search-compressions beam-size (make-program '() sexpr))))])
+             (if (null? top-compressions)
+                 (display "not compressible\n")
+                 (first top-compressions))))
          
          )
     
